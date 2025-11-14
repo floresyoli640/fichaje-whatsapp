@@ -2,6 +2,7 @@
   "name": "fichaje-whatsapp",
   "version": "1.0.0",
   "description": "Bot de fichaje por WhatsApp con Baileys para Railway",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
