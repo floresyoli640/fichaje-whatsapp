@@ -1,53 +1,70 @@
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
-import P from "pino";
-import express from "express";
-import qrcode from "qrcode";
+import express from "express"
+import makeWASocket, { useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys"
+import qrcode from "qrcode-terminal"
+import fs from "fs"
+import path from "path"
 
-// Servidor Express para mostrar el QR como imagen
-const app = express();
-let qrImage = null; // Aquí guardamos el último QR generado
+const app = express()
+const PORT = process.env.PORT || 3000
 
+let ultimoQR = null
+
+// ---------- SERVIDOR WEB PARA MOSTRAR QR ----------
 app.get("/qr", (req, res) => {
-    if (!qrImage) {
-        return res.send("QR aún no generado, espera 5 segundos y recarga.");
-    }
+    if (!ultimoQR) return res.send("QR aún no generado, espera 5 segundos y recarga.")
 
-    res.setHeader("Content-Type", "image/png");
-    res.send(Buffer.from(qrImage.split(",")[1], "base64"));
-});
+    res.send(`
+        <html>
+            <body style="display:flex;justify-content:center;align-items:center;flex-direction:column;font-family:sans-serif;">
+                <h2>Escanea el QR para vincular el bot</h2>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?data=${ultimoQR}&size=300x300" />
+            </body>
+        </html>
+    `)
+})
 
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Servidor QR listo");
-});
+app.listen(PORT, () => {
+    console.log(`Servidor QR listo en puerto ${PORT}`)
+})
 
+// ---------- INICIAR BAILEYS ----------
 async function iniciarBot() {
-    const { state, saveCreds } = await useMultiFileAuthState("./baileys_auth");
+    console.log("Iniciando bot de WhatsApp...")
+
+    const authPath = path.resolve("./baileys_auth")
+    if (!fs.existsSync(authPath)) fs.mkdirSync(authPath)
+
+    const { state, saveCreds } = await useMultiFileAuthState(authPath)
+
+    const { version } = await fetchLatestBaileysVersion()
 
     const sock = makeWASocket({
-        logger: P({ level: "silent" }),
-        printQRInTerminal: false,
+        version,
         auth: state,
-    });
+        printQRInTerminal: false
+    })
 
-    sock.ev.on("creds.update", saveCreds);
+    // Evento QR
+    sock.ev.on("connection.update", (u) => {
+        const { qr, connection } = u
 
-    // Capturamos y convertimos el QR en PNG
-    sock.ev.on("connection.update", async (update) => {
-        const { qr } = update;
         if (qr) {
-            console.log("📌 Nuevo QR generado. Puedes verlo en:");
-            console.log("👉 https://TU-PROYECTO-RAILWAY.app/qr");
-
-            // Generar PNG en Base64
-            qrImage = await qrcode.toDataURL(qr);
+            ultimoQR = qr
+            console.log("Nuevo QR generado")
+            qrcode.generate(qr, { small: true })
         }
-    });
 
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-        const msg = messages[0];
-        if (!msg.message) return;
-        console.log("Mensaje recibido:", msg.key.remoteJid);
-    });
+        if (connection === "open") {
+            console.log("Bot conectado correctamente ✔")
+        }
+
+        if (connection === "close") {
+            console.log("Conexión cerrada. Intentando reconectar...")
+            iniciarBot()
+        }
+    })
+
+    sock.ev.on("creds.update", saveCreds)
 }
 
-iniciarBot();
+iniciarBot()
