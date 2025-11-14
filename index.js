@@ -13,7 +13,11 @@ Parse.serverURL = "https://parseapi.back4app.com/";
 //   IMPORTS WHATSAPP / BAILEYS
 // ===============================
 import express from "express";
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion
+} from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 
 
@@ -31,7 +35,7 @@ app.get("/", (req, res) => {
 
 app.get("/qr", async (req, res) => {
   if (!ultimoQR) {
-    return res.send("QR aún no generado. Recarga en 3 segundos.");
+    return res.send("QR aún no generado o ya conectado. Recarga en 3 segundos.");
   }
 
   try {
@@ -102,25 +106,42 @@ const esperandoUbicacion = new Map();
 
 async function iniciarBot() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth_data");
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
+    version,
     auth: state,
-    browser: ["YolandaBot", "Chrome", "1.0"] // 🔥 COMPATIBLE Y ESTABLE
-    // printQRInTerminal: true  QUITADO POR DEPRECACIÓN
+    browser: ["FichajeBot", "Chrome", "1.0"]
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ============= QR EVENTO =============
-  sock.ev.on("connection.update", (update) => {
+  // ============= QR Y ESTADO DE CONEXIÓN =============
+  sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
+
     if (qr) {
-      ultimoQR = qr; // Guarda el QR para mostrar en endpoint
+      ultimoQR = qr;
       console.log("📲 Nuevo QR generado para vincular WhatsApp");
     }
-    console.log(`Estado conexión: ${connection}`);
-    if (lastDisconnect) {
-      console.log(`Última desconexión: ${lastDisconnect.error}`);
+
+    if (connection === "open") {
+      console.log("✅ Conexión a WhatsApp establecida");
+      ultimoQR = null;
+    }
+
+    if (connection === "close") {
+      const errorCode = lastDisconnect?.error?.output?.statusCode;
+      const motivo = lastDisconnect?.error?.message || "Desconocido";
+      console.log(`❌ Conexión cerrada (${motivo}) - Código: ${errorCode}`);
+
+      const debeReconectar = errorCode !== DisconnectReason.loggedOut;
+      if (debeReconectar) {
+        console.log("🔄 Intentando reconectar...");
+        iniciarBot();
+      } else {
+        console.log("🛑 Usuario deslogueado. Escanea el QR nuevamente.");
+      }
     }
   });
 
@@ -134,7 +155,6 @@ async function iniciarBot() {
       ? msg.message.conversation.trim().toUpperCase()
       : "";
 
-    // ----------- Si está esperando ubicación ----------
     if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
       const info = esperandoUbicacion.get(numero);
       esperandoUbicacion.delete(numero);
@@ -159,7 +179,6 @@ async function iniciarBot() {
       return;
     }
 
-    // ----------- Comandos de fichaje -----------
     if (texto === "ENTRADA" || texto === "SALIDA") {
       const empleado = await buscarEmpleadoPorNumero(numero);
 
@@ -179,7 +198,6 @@ async function iniciarBot() {
       return;
     }
 
-    // ----------- Otros textos -----------
     if (esperandoUbicacion.has(numero)) {
       await sock.sendMessage(msg.key.remoteJid, {
         text: "⚠️ Aún espero tu ubicación."
@@ -194,3 +212,4 @@ async function iniciarBot() {
 }
 
 iniciarBot();
+
