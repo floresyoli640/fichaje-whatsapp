@@ -1,0 +1,58 @@
+[
+  {
+    "numero": "34696963442@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Yolanda Flores Frías",
+    "accion": "ENTRADA",
+    "fecha": "2025-10-31T11:48:43.672Z"
+  },
+  {
+    "numero": "34696963442@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Yolanda Flores Frías",
+    "accion": "SALIDA",
+    "fecha": "2025-10-31T11:48:51.356Z"
+  },
+  {
+    "numero": "34696963442@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Yolanda Flores Frías",
+    "accion": "ENTRADA",
+    "fecha": "2025-10-31T11:57:36.916Z"
+  },
+  {
+    "numero": "34696963442@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Yolanda Flores Frías",
+    "accion": "SALIDA",
+    "fecha": "2025-10-31T11:58:17.610Z"
+  },
+  {
+    "numero": "34666141093@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "María Muñoz Sanchez",
+    "accion": "ENTRADA",
+    "fecha": "2025-10-31T11:59:26.195Z"
+  },
+  {
+    "numero": "34666141093@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "María Muñoz Sanchez",
+    "accion": "SALIDA",
+    "fecha": "2025-10-31T11:59:50.168Z"
+  },
+  {
+    "numero": "34649682249@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Alcázar Marín Ruiz",
+    "accion": "ENTRADA",
+    "fecha": "2025-10-31T12:00:33.925Z"
+  },
+  {
+    "numero": "34649682249@c.us",
+    "empresa": "La Primera Telecomunicación",
+    "usuario": "Alcázar Marín Ruiz",
+    "accion": "SALIDA",
+    "fecha": "2025-10-31T12:00:45.298Z"
+  }
+]

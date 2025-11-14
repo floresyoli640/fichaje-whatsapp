@@ -1,0 +1,15 @@
+{
+  "name": "fichaje-whatsapp",
+  "version": "1.0.0",
+  "description": "Bot de fichaje por WhatsApp con Baileys para Railway",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.5.0",
+    "parse": "^7.0.2",
+    "pdfkit": "^0.17.2",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
