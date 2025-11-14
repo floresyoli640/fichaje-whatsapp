@@ -1,223 +1,229 @@
-// -----------------------------
-// IMPORTS
-// -----------------------------
-import express from "express";
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason
-} from "@whiskeysockets/baileys";
-import qrcode from "qrcode";
-import Parse from "parse/node.js";
+// ==========================
+// 🔹 IMPORTACIONES
+// ==========================
+const Parse = require('parse/node');
+const express = require('express');
+const { Boom } = require('@hapi/boom');
+const makeWASocket = require('@whiskeysockets/baileys').default;
+const {
+    useSingleFileAuthState,
+    fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
 
-// -----------------------------
-// BACK4APP CONFIG
-// -----------------------------
+// ==========================
+// 🔹 CONFIG BACK4APP
+// ==========================
 Parse.initialize(
-  "Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ", // Application ID
-  "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP"  // JavaScript key
+    "Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ",
+    "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP"
 );
 Parse.serverURL = "https://parseapi.back4app.com/";
 
-const Employees = Parse.Object.extend("Employees");
-const TimeEntries = Parse.Object.extend("TimeEntries");
-const Companies = Parse.Object.extend("Companies");
-
-// ----------------------------------
-// VARIABLES
-// ----------------------------------
-let sock = null;
+// ==========================
+// 🔹 EXPRESS SERVER
+// ==========================
+const app = express();
 let ultimoQR = null;
 let conectado = false;
+
+// Ruta QR
+app.get('/qr', (req, res) => {
+    if (!ultimoQR) {
+        return res.send("<h2>QR aún no generado. Espera 3 segundos y recarga.</h2>");
+    }
+
+    // Mostrar QR en HTML
+    const QRCode = require('qrcode');
+    QRCode.toDataURL(ultimoQR, (err, url) => {
+        if (err) return res.send("Error generando QR");
+
+        res.send(`
+            <html>
+            <body style="text-align:center;font-family:sans-serif;">
+                <h2>Escanea este QR para vincular WhatsApp</h2>
+                <img src="${url}" style="width:320px;"/>
+            </body>
+            </html>
+        `);
+    });
+});
+
+// Mantener vivo
+app.get('/keepalive', (req, res) => {
+    res.send("OK");
+});
+
+// Puerto Railway
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => console.log("🌍 Servidor Express en puerto " + PORT));
+
+// ==========================
+// 🔹 AUTH de BAILEYS
+// ==========================
+const { state, saveState } = useSingleFileAuthState('./baileys_auth/session.json');
+
+let sock;
+
+// ==========================
+// 🔹 Iniciar WhatsApp
+// ==========================
+async function iniciarBot() {
+    const { version } = await fetchLatestBaileysVersion();
+
+    sock = makeWASocket({
+        version,
+        printQRInTerminal: false,
+        auth: state
+    });
+
+    // Guardar sesión
+    sock.ev.on('creds.update', saveState);
+
+    // ======================
+    // 📌 EVENTO QR
+    // ======================
+    sock.ev.on('connection.update', (update) => {
+        const { connection, qr } = update;
+
+        if (qr) {
+            ultimoQR = qr;
+            conectado = false;
+            console.log("📲 Nuevo QR generado (cópialo en logs si lo necesitas):");
+            console.log(qr);
+        }
+
+        if (connection === 'open') {
+            conectado = true;
+            console.log("✅ WhatsApp conectado correctamente");
+        }
+
+        if (connection === 'close') {
+            console.log("❌ Conexión cerrada, reintentando...", update);
+            setTimeout(() => iniciarBot(), 2000);
+        }
+    });
+
+    // ======================
+    // 📌 MENSAJE RECIBIDO
+    // ======================
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        const msg = messages[0];
+        if (!msg.message || !msg.key.remoteJid.endsWith("@s.whatsapp.net")) return;
+
+        const numero = msg.key.remoteJid.replace("@s.whatsapp.net", "");
+        let texto = "";
+
+        // Extraer mensaje
+        if (msg.message.conversation) {
+            texto = msg.message.conversation;
+        } else if (msg.message.extendedTextMessage) {
+            texto = msg.message.extendedTextMessage.text;
+        }
+
+        texto = texto.trim().toUpperCase();
+
+        console.log("📩 Mensaje recibido:", texto, "de", numero);
+
+        // Ubicación
+        if (waitingForLocation.has(numero) && msg.message.locationMessage) {
+            const { accion, empleado } = waitingForLocation.get(numero);
+            waitingForLocation.delete(numero);
+
+            const lat = msg.message.locationMessage.degreesLatitude;
+            const lon = msg.message.locationMessage.degreesLongitude;
+
+            const nombre = empleado.get("nombre");
+            const dni = empleado.get("dni");
+            const empresa = empleado.get("empresa");
+
+            await guardarFichaje({
+                nombre,
+                dni,
+                numero,
+                empresa,
+                accion,
+                latitud: lat,
+                longitud: lon
+            });
+
+            sock.sendMessage(msg.key.remoteJid, {
+                text: `✅ Fichaje de ${accion} registrado correctamente.\n📍 Ubicación guardada.`
+            });
+
+            return;
+        }
+
+        // Entrada o salida
+        if (texto === "ENTRADA" || texto === "SALIDA") {
+            const empleado = await buscarEmpleado(numero);
+
+            if (!empleado) {
+                sock.sendMessage(msg.key.remoteJid, { text: "❌ No estás autorizado para fichar." });
+                return;
+            }
+
+            waitingForLocation.set(numero, { accion: texto, empleado });
+
+            sock.sendMessage(msg.key.remoteJid, {
+                text: "📍 Por favor, envía tu *ubicación actual* para completar el fichaje."
+            });
+
+            return;
+        }
+
+        // Otros mensajes
+        sock.sendMessage(msg.key.remoteJid, {
+            text: "Envía *ENTRADA* o *SALIDA* para fichar."
+        });
+    });
+}
+
+// ==========================
+// 🔹 ESTADOS TEMPORALES
+// ==========================
 const waitingForLocation = new Map();
 
-// ----------------------------------
-// EXPRESS SERVER PARA MOSTRAR EL QR
-// ----------------------------------
-const app = express();
-const PORT = process.env.PORT || 3000;
+// ==========================
+// 🔹 FUNCIONES BACK4APP
+// ==========================
+async function buscarEmpleado(telefono) {
+    const Employees = Parse.Object.extend("Employees");
+    const query = new Parse.Query(Employees);
+    query.equalTo("telefono", telefono);
+    query.include("empresa");
 
-app.get("/", (req, res) => {
-  res.send(`
-    <h2>Servidor funcionando correctamente</h2>
-    <p>Ve a <a href="/qr">/qr</a> para escanear el código QR de WhatsApp.</p>
-  `);
-});
-
-app.get("/qr", async (req, res) => {
-  if (conectado) {
-    return res.send("✅ WhatsApp ya está conectado.");
-  }
-
-  if (!ultimoQR) {
-    return res.send("Q🕓 QR aún no generado. Recarga en 5 segundos.");
-  }
-
-  const dataURL = await qrcode.toDataURL(ultimoQR);
-  res.send(`
-    <html>
-    <body style="text-align:center;font-family:sans-serif;">
-      <h2>Escanea el QR con WhatsApp</h2>
-      <img src="${dataURL}" width="300" />
-    </body>
-    </html>
-  `);
-});
-
-app.listen(PORT, () => console.log("🌍 Servidor Express en puerto", PORT));
-
-// ----------------------------------
-// FUNCIONES BACK4APP
-// ----------------------------------
-async function buscarEmpleadoPorNumero(numero) {
-  const query = new Parse.Query(Employees);
-  query.equalTo("telefono", numero);
-  query.include("empresa");
-  return await query.first();
+    return await query.first();
 }
 
 async function guardarFichaje({ nombre, dni, numero, empresa, accion, latitud, longitud }) {
-  const entry = new TimeEntries();
+    const TimeEntry = Parse.Object.extend("TimeEntries");
+    const entry = new TimeEntry();
 
-  entry.set("nombre", nombre);
-  entry.set("dni", dni);
-  entry.set("numero", numero);
-  entry.set("accion", accion);
-  entry.set("fecha", new Date());
+    entry.set("nombre", nombre);
+    entry.set("dni", dni);
+    entry.set("numero", numero);
+    entry.set("accion", accion);
+    entry.set("fecha", new Date());
 
-  // Pointer empresa
-  if (empresa) {
-    const empresaPointer = new Companies();
-    empresaPointer.id = empresa.id;
-    entry.set("empresa", empresaPointer);
-  }
+    // Pointer empresa
+    if (empresa) entry.set("empresa", empresa);
 
-  // Geopoint
-  if (latitud && longitud) {
-    entry.set("ubicacion", new Parse.GeoPoint({ latitude: latitud, longitude: longitud }));
-  }
+    // Ubicación
+    if (latitud && longitud) {
+        const point = new Parse.GeoPoint({ latitude: latitud, longitude: longitud });
+        entry.set("ubicacion", point);
+    }
 
-  await entry.save();
+    try {
+        await entry.save();
+        console.log("💾 Fichaje guardado en Back4App");
+    } catch (err) {
+        console.error("❌ Error guardando fichaje:", err);
+    }
 }
 
-// ----------------------------------
-// INICIAR WHATSAPP BAILEYS
-// ----------------------------------
-async function iniciarBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./baileys_auth");
-
-  sock = makeWASocket({
-    printQRInTerminal: false,
-    auth: state,
-    browser: ["YolandaBot", "Chrome", "1.0"],
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  // ----------------------
-  // EVENTO: QR
-  // ----------------------
-  sock.ev.on("connection.update", async ({ connection, qr, lastDisconnect }) => {
-
-    if (qr) {
-      ultimoQR = qr;
-      conectado = false;
-      console.log("📲 Nuevo QR listo.");
-    }
-
-    if (connection === "open") {
-      conectado = true;
-      ultimoQR = null;
-      console.log("✅ WhatsApp conectado.");
-    }
-
-    if (connection === "close") {
-      conectado = false;
-      const code = lastDisconnect?.error?.output?.statusCode;
-      console.log("❌ Conexión cerrada:", code);
-
-      if (code !== DisconnectReason.loggedOut) {
-        console.log("🔁 Reintentando...");
-        iniciarBot();
-      }
-    }
-  });
-
-  // ----------------------
-  // EVENTO: MENSAJES
-  // ----------------------
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message) return;
-
-    const numero = msg.key.remoteJid.replace("@s.whatsapp.net", "");
-    let texto = "";
-
-    if (msg.message.conversation) texto = msg.message.conversation;
-    if (msg.message.extendedTextMessage) texto = msg.message.extendedTextMessage.text;
-    texto = texto.trim().toUpperCase();
-
-    // -----------------------------------
-    // RECIBIENDO UBICACIÓN
-    // -----------------------------------
-    if (msg.message.locationMessage && waitingForLocation.has(numero)) {
-      const { accion, empleado } = waitingForLocation.get(numero);
-      waitingForLocation.delete(numero);
-
-      const nombre = empleado.get("nombre");
-      const dni = empleado.get("dni");
-      const empresa = empleado.get("empresa");
-
-      const latitud = msg.message.locationMessage.degreesLatitude;
-      const longitud = msg.message.locationMessage.degreesLongitude;
-
-      await guardarFichaje({ nombre, dni, numero, empresa, accion, latitud, longitud });
-
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `✅ Fichaje de ${accion} registrado correctamente para ${nombre}.`
-      });
-
-      return;
-    }
-
-    // -----------------------------------
-    // COMANDOS ENTRADA / SALIDA
-    // -----------------------------------
-    if (texto === "ENTRADA" || texto === "SALIDA") {
-      const empleado = await buscarEmpleadoPorNumero(numero);
-
-      if (!empleado) {
-        await sock.sendMessage(msg.key.remoteJid, {
-          text: "❌ Tu número no está autorizado para fichar."
-        });
-        return;
-      }
-
-      waitingForLocation.set(numero, { accion: texto, empleado });
-
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "📍 Por favor envía tu ubicación actual para registrar el fichaje."
-      });
-
-      return;
-    }
-
-    // -----------------------------------
-    // Esperando ubicación y envía texto en vez de ubicación
-    // -----------------------------------
-    if (waitingForLocation.has(numero)) {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ Falta tu ubicación. Por favor envíala usando el icono de clip."
-      });
-      return;
-    }
-
-    // -----------------------------------
-    // Respuesta por defecto
-    // -----------------------------------
-    await sock.sendMessage(msg.key.remoteJid, {
-      text: 'Envía "ENTRADA" o "SALIDA" para fichar.'
-    });
-  });
-}
-
+// ==========================
+// 🔹 INICIAR BOT
+// ==========================
 iniciarBot();
+
