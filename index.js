@@ -143,14 +143,8 @@ async function iniciarBot() {
 
       await guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, latitud: lat, longitud: lon });
 
-      const hora = new Date().toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `✅ Fichaje de ${accion} registrado para ${nombre} a las ${hora}.`
+        text: `✅ Fichaje de ${accion} registrado para ${nombre} a las ${new Date().toLocaleTimeString()}.`
       });
       return;
     }
