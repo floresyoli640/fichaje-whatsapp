@@ -1,102 +1,49 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
-import Pino from "pino";
-import fs from "fs";
-import { generatePDF } from "./generarInformePDF.js";
+import pkg from '@whiskeysockets/baileys';
+const { default: WAConnection, useMultiFileAuthState, makeInMemoryStore, Browsers } = pkg;
+
+import fs from 'fs';
+import { generatePDF } from './generarInformePDF.js';
 
 async function iniciarBot() {
-    console.log("🟢 Iniciando bot...");
+    console.log("🚀 Iniciando bot...");
 
-    // Cargar o crear credenciales
-    const { state, saveCreds } = await useMultiFileAuthState("./baileys_auth");
+    const { state, saveCreds } = await useMultiFileAuthState('./baileys_auth');
+    const store = makeInMemoryStore({});
 
-    const sock = makeWASocket({
-        printQRInTerminal: true,
+    const sock = WAConnection({
         auth: state,
-        logger: Pino({ level: "silent" }) 
+        printQRInTerminal: true,
+        browser: Browsers.ubuntu("Chrome"),
     });
 
-    // Guardar sesión cuando cambie
-    sock.ev.on("creds.update", saveCreds);
+    store.bind(sock.ev);
 
-    // Manejar recepción de mensajes
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-        const msg = messages[0];
-        if (!msg.message) return;
+    sock.ev.on('creds.update', saveCreds);
 
-        const from = msg.key.remoteJid;
-        const texto = msg.message.conversation || msg.message.extendedTextMessage?.text;
+    sock.ev.on('messages.upsert', async (msg) => {
+        const m = msg.messages[0];
+        if (!m.message) return;
 
-        if (!texto) return;
+        const texto = m.message.conversation || "";
 
-        console.log("📩 Mensaje recibido:", texto);
-
-        // Registrar fichaje
-        if (texto.toLowerCase() === "fichar") {
-            const hora = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
-            const registro = { empleado: from, hora };
-
-            let fichajes = [];
-
-            if (fs.existsSync("fichajes.json")) {
-                fichajes = JSON.parse(fs.readFileSync("fichajes.json", "utf8"));
-            }
-
-            fichajes.push(registro);
-            fs.writeFileSync("fichajes.json", JSON.stringify(fichajes, null, 2));
-
-            await sock.sendMessage(from, { text: "✅ Fichaje registrado a las " + hora });
+        if (texto === "!pdf") {
+            const pdf = await generatePDF();
+            await sock.sendMessage(m.key.remoteJid, { document: { url: pdf }, mimetype: "application/pdf", fileName: "informe_fichajes.pdf" });
         }
 
-        // Ver fichajes
-        if (texto.toLowerCase() === "ver fichajes") {
-            if (!fs.existsSync("fichajes.json")) {
-                await sock.sendMessage(from, { text: "⚠️ No hay fichajes registrados." });
-                return;
-            }
+        if (texto.startsWith("!fichar")) {
+            const empleado = texto.replace("!fichar ", "").trim();
 
-            const fichajes = JSON.parse(fs.readFileSync("fichajes.json", "utf8"));
-            let mensaje = "📋 *Listado de fichajes:*\n\n";
+            const registro = {
+                empleado,
+                hora: new Date().toLocaleString("es-ES")
+            };
 
-            fichajes.forEach(f => {
-                mensaje += `👤 ${f.empleado}\n⏰ ${f.hora}\n\n`;
-            });
+            const datos = JSON.parse(fs.readFileSync("fichajes.json", "utf8"));
+            datos.push(registro);
+            fs.writeFileSync("fichajes.json", JSON.stringify(datos, null, 2));
 
-            await sock.sendMessage(from, { text: mensaje });
-        }
-
-        // Generar PDF
-        if (texto.toLowerCase() === "generar informe") {
-            if (!fs.existsSync("fichajes.json")) {
-                await sock.sendMessage(from, { text: "⚠️ No hay fichajes para generar el informe." });
-                return;
-            }
-
-            const pdfPath = await generatePDF();
-
-            await sock.sendMessage(from, {
-                document: fs.readFileSync(pdfPath),
-                mimetype: "application/pdf",
-                fileName: "informe_fichajes.pdf"
-            });
-        }
-    });
-
-    // Manejar desconexiones
-    sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect } = update;
-
-        if (connection === "close") {
-            const shouldReconnect =
-                lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-
-            if (shouldReconnect) {
-                console.log("🔄 Reconectando...");
-                iniciarBot();
-            } else {
-                console.log("❌ Sesión cerrada. Escanea el QR nuevamente.");
-            }
-        } else if (connection === "open") {
-            console.log("✅ Bot conectado a WhatsApp correctamente.");
+            await sock.sendMessage(m.key.remoteJid, { text: `Fichaje registrado para ${empleado}` });
         }
     });
 }
