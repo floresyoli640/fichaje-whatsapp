@@ -106,16 +106,21 @@ async function iniciarBot() {
   const sock = makeWASocket({
     auth: state,
     browser: ["YolandaBot", "Chrome", "1.0"] // 🔥 COMPATIBLE Y ESTABLE
-    // printQRInTerminal: true <-- QUITAR ESTA OPCIÓN
+    // printQRInTerminal: true  QUITADO POR DEPRECACIÓN
   });
 
   sock.ev.on("creds.update", saveCreds);
 
   // ============= QR EVENTO =============
-  sock.ev.on("connection.update", ({ qr }) => {
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
     if (qr) {
-      ultimoQR = qr; // Aquí se guarda el QR para el endpoint
+      ultimoQR = qr; // Guarda el QR para mostrar en endpoint
       console.log("📲 Nuevo QR generado para vincular WhatsApp");
+    }
+    console.log(`Estado conexión: ${connection}`);
+    if (lastDisconnect) {
+      console.log(`Última desconexión: ${lastDisconnect.error}`);
     }
   });
 
@@ -189,7 +194,3 @@ async function iniciarBot() {
 }
 
 iniciarBot();
-
-
-
-
