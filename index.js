@@ -217,7 +217,9 @@ async function iniciarBot() {
     const texto = obtenerTexto(msg).trim().toUpperCase();
     console.log(`📩 Mensaje de ${numero}: ${texto}`);
 
-    // Fichaje: ubicación
+    // ===========================
+    //  FICHAJE: UBICACIÓN
+    // ===========================
     if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
       const { accion, empleado } = esperandoUbicacion.get(numero);
       esperandoUbicacion.delete(numero);
@@ -233,6 +235,39 @@ async function iniciarBot() {
         `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
       );
 
+      // 🧭 Punto de fichaje
+      const puntoFichaje = new Parse.GeoPoint({
+        latitude: latitud,
+        longitude: longitud
+      });
+
+      // 🏢 Ubicación de la empresa (GeoPoint en campo "ubicacion")
+      const ubicacionEmpresa = empresa?.get("ubicacion");
+
+      if (ubicacionEmpresa instanceof Parse.GeoPoint) {
+        const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
+        const distanciaMetros = distanciaKm * 1000;
+
+        console.log(
+          `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
+        );
+
+        if (distanciaMetros > 40) {
+          // ❌ Fuera de radio permitido
+          await sock.sendMessage(msg.key.remoteJid, {
+            text:
+              "🐦 Hay pájaro, no estás en la oficina.\n" +
+              "Para fichar debes estar en la oficina 😉"
+          });
+          return;
+        }
+      } else {
+        console.log(
+          "⚠️ La empresa no tiene 'ubicacion' (GeoPoint) configurada. Se admite fichaje igualmente."
+        );
+      }
+
+      // ✅ Dentro del radio permitido (o sin ubicación de empresa): se guarda
       await guardarFichajeEnBack4app({
         nombre,
         dni,
@@ -253,12 +288,15 @@ async function iniciarBot() {
     // Si no es ubicación y estábamos esperando ubicación
     if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
       await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
+        text:
+          "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
       });
       return;
     }
 
-    // Si el mensaje es ENTRADA o SALIDA, vamos a preparar fichaje
+    // ===========================
+    //  FICHAJE: ENTRADA / SALIDA
+    // ===========================
     if (texto === "ENTRADA" || texto === "SALIDA") {
       const accion = texto;
 
@@ -306,7 +344,7 @@ async function iniciarBot() {
       return;
     }
 
-    // Respuesta genérica
+    // Respuesta genérica (por si acaso)
     await sock.sendMessage(msg.key.remoteJid, {
       text: "Envía *ENTRADA* o *SALIDA* para fichar."
     });
@@ -314,3 +352,4 @@ async function iniciarBot() {
 }
 
 iniciarBot();
+
