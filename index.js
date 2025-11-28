@@ -17,13 +17,14 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
+
 import QRCode from "qrcode";
 
 // ===============================
-//   SERVIDOR EXPRESS PARA EL QR
+//   EXPRESS PARA VER EL QR
 // ===============================
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
 let ultimoQR = null;
 
@@ -57,11 +58,11 @@ function normalizarNumero(num) {
 // ===============================
 //   BASE DE DATOS
 // ===============================
+
 async function buscarEmpleadoPorNumero(numeroRaw) {
   const Employees = Parse.Object.extend("Employees");
-  const query = new Parse.Query(Employees);
 
-  const numLimpio = normalizarNumero(numeroRaw);
+  const numLimpio = normalizarNumero(numeroRaw || "");
   const ultimos9 = numLimpio.slice(-9); // últimos 9 dígitos del número
 
   console.log(
@@ -71,8 +72,21 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
     "ultimos9 =", ultimos9
   );
 
-  // Buscamos registros cuyo campo "telefono" CONTENGA esos 9 dígitos
-  query.contains("telefono", ultimos9);
+  // Detectamos si parece un teléfono español normal (34 + 9 dígitos)
+  const esTelefonoEspanol =
+    numLimpio.startsWith("34") && numLimpio.length >= 11 && numLimpio.length <= 13;
+
+  let query = new Parse.Query(Employees);
+
+  if (esTelefonoEspanol) {
+    // Buscamos por teléfono (como antes, usando los últimos 9 dígitos por seguridad)
+    query.contains("telefono", ultimos9);
+  } else {
+    // Si no parece un teléfono, asumimos que es un waId interno de WhatsApp
+    // Necesitas tener una columna "waId" (String) en Employees para que esto funcione
+    query.equalTo("waId", numLimpio);
+  }
+
   query.include("empresa");
 
   const empleado = await query.first();
@@ -84,7 +98,9 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
       "✅ Empleado encontrado:",
       empleado.get("nombre"),
       "| teléfono BD =",
-      empleado.get("telefono")
+      empleado.get("telefono"),
+      "| waId BD =",
+      empleado.get("waId")
     );
   }
 
@@ -100,92 +116,97 @@ async function guardarFichajeEnBack4app({
   latitud,
   longitud
 }) {
-  const TimeEntry = Parse.Object.extend("TimeEntries");
-  const entry = new TimeEntry();
-  entry.set("nombre", nombre);
-  entry.set("dni", dni);
-  entry.set("numero", numero);
-  entry.set("accion", accion);
-  entry.set("fecha", new Date());
+  const TimeEntry = Parse.Object.extend("TimeEntry");
+  const timeEntry = new TimeEntry();
 
-  if (empresa && typeof empresa.get === "function") {
-    entry.set("empresa", empresa);
+  timeEntry.set("nombre", nombre);
+  timeEntry.set("dni", dni);
+  timeEntry.set("numero", numero);
+
+  if (empresa) {
+    timeEntry.set("empresa", empresa);
   }
 
-  if (latitud && longitud) {
-    entry.set(
-      "ubicacion",
-      new Parse.GeoPoint({ latitude: latitud, longitude: longitud })
-    );
-  }
+  timeEntry.set("accion", accion);
+  timeEntry.set("latitud", latitud || null);
+  timeEntry.set("longitud", longitud || null);
 
   try {
-    await entry.save();
-    console.log("✔ Fichaje guardado en Back4app");
-  } catch (e) {
-    console.error("❌ Error guardando fichaje:", e);
+    await timeEntry.save();
+    console.log("✅ Fichaje guardado en Back4App");
+  } catch (error) {
+    console.error("❌ Error guardando fichaje:", error);
   }
 }
 
 // ===============================
-//   BOT DE WHATSAPP
+//   OBTENER TEXTO DEL MENSAJE
 // ===============================
-const esperandoUbicacion = new Map();
-
 function obtenerTexto(msg) {
-  if (!msg.message) return "";
-  if (msg.message.conversation) return msg.message.conversation;
-  if (msg.message.extendedTextMessage)
-    return msg.message.extendedTextMessage.text;
-  if (msg.message.buttonsResponseMessage)
-    return msg.message.buttonsResponseMessage.selectedDisplayText;
-  if (msg.message.listResponseMessage)
-    return msg.message.listResponseMessage.title;
+  const message = msg.message;
+
+  if (message.conversation) return message.conversation;
+  if (message.extendedTextMessage)
+    return message.extendedTextMessage.text || "";
+  if (message.imageMessage && message.imageMessage.caption)
+    return message.imageMessage.caption;
+
   return "";
 }
 
+// ===============================
+//   WHATSAPP BOT
+// ===============================
 async function iniciarBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("./auth_data");
+  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
     auth: state,
-    browser: ["FichajeBot", "Chrome", "1.0"]
+    printQRInTerminal: true
+  });
+
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      ultimoQR = qr;
+      console.log("⚠️ QR recibido. Ve a /qr para escanearlo.");
+    }
+
+    if (connection === "close") {
+      const shouldReconnect =
+        lastDisconnect?.error?.output?.statusCode !==
+        DisconnectReason.loggedOut;
+      console.log(
+        "❌ Conexión cerrada. ¿Reconectar?",
+        shouldReconnect ? "Sí" : "No"
+      );
+      if (shouldReconnect) iniciarBot();
+    } else if (connection === "open") {
+      ultimoQR = null;
+      console.log("✅ Conectado a WhatsApp");
+    }
   });
 
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", ({ connection, lastDisconnect, qr }) => {
-    if (qr) {
-      ultimoQR = qr;
-      console.log("📲 Nuevo QR generado para vincular WhatsApp");
-    }
-
-    if (connection === "open") {
-      console.log("✅ Conexión a WhatsApp establecida");
-      ultimoQR = null;
-    }
-
-    if (connection === "close") {
-      const errorCode = lastDisconnect?.error?.output?.statusCode;
-      const debeReconectar = errorCode !== DisconnectReason.loggedOut;
-      console.log(
-        `❌ Desconectado. Código: ${errorCode}. Reconectar: ${debeReconectar}`
-      );
-      if (debeReconectar) iniciarBot();
-    }
-  });
+  // Mapa para almacenar quién ha pedido fichaje y está enviando ubicación
+  const esperandoUbicacion = new Map();
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
     const rawJid = msg.key.remoteJid || "";
-    console.log("🔍 rawJid recibido:", rawJid);
+    const rawParticipant = msg.key.participant || "";
 
-    const numero = normalizarNumero(rawJid.split("@")[0]);
-    console.log("📞 Número normalizado:", numero);
+    console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
+
+    const baseId = rawParticipant || rawJid;
+    const numero = normalizarNumero(baseId.split("@")[0]);
+    console.log("📞 Identificador normalizado:", numero);
 
     const texto = obtenerTexto(msg).trim().toUpperCase();
     console.log(`📩 Mensaje de ${numero}: ${texto}`);
@@ -198,8 +219,13 @@ async function iniciarBot() {
       const nombre = empleado.get("nombre") || "-";
       const dni = empleado.get("dni") || "-";
       const empresa = empleado.get("empresa");
-      const lat = msg.message.locationMessage.degreesLatitude;
-      const lon = msg.message.locationMessage.degreesLongitude;
+
+      const latitud = msg.message.locationMessage.degreesLatitude;
+      const longitud = msg.message.locationMessage.degreesLongitude;
+
+      console.log(
+        `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
+      );
 
       await guardarFichajeEnBack4app({
         nombre,
@@ -207,36 +233,67 @@ async function iniciarBot() {
         numero,
         empresa,
         accion,
-        latitud: lat,
-        longitud: lon
+        latitud,
+        longitud
       });
 
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `✅ Fichaje de ${accion} registrado para ${nombre} a las ${new Date().toLocaleTimeString()}.`
+        text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
+      });
+
+      return;
+    }
+
+    // Si no es ubicación y estábamos esperando ubicación
+    if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación."
       });
       return;
     }
 
-    // Fichaje: ENTRADA/SALIDA
+    // Si el mensaje es ENTRADA o SALIDA, vamos a preparar fichaje
     if (texto === "ENTRADA" || texto === "SALIDA") {
+      const accion = texto;
+
       const empleado = await buscarEmpleadoPorNumero(numero);
+
       if (!empleado) {
         await sock.sendMessage(msg.key.remoteJid, {
-          text: "❌ Tu número no está autorizado para fichar. Consulta al administrador."
+          text:
+            "❌ No te encuentro en la base de datos.\n" +
+            "Por favor, contacta con administración."
         });
         return;
       }
 
-      esperandoUbicacion.set(numero, { accion: texto, empleado });
+      const nombre = empleado.get("nombre") || "-";
+      const dni = empleado.get("dni") || "-";
+      const empresa = empleado.get("empresa");
+
+      // Guardamos en el mapa que esperamos la ubicación de este número
+      esperandoUbicacion.set(numero, { accion, empleado });
 
       await sock.sendMessage(msg.key.remoteJid, {
-        text: "📍 Por favor, comparte tu ubicación para registrar el fichaje. (Usa el icono de clip y selecciona 'Ubicación')."
+        text:
+          `Hola, ${nombre}.\n` +
+          `Para registrar tu *${accion}*, envíame ahora tu ubicación en tiempo real ` +
+          "usando el icono del clip 📎 → Ubicación."
+      });
+
+      return;
+    }
+
+    // Si llega un mensaje de texto normal y no está en flujo de fichaje
+    if (!esperandoUbicacion.has(numero)) {
+      await sock.sendMessage(msg.key.remoteJid, {
+        text: "Hola 👋. Escribe *ENTRADA* o *SALIDA* para fichar."
       });
       return;
     }
 
-    // Aún esperando ubicación
-    if (esperandoUbicacion.has(numero)) {
+    // Si está en flujo de fichaje pero manda otra cosa
+    if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
       await sock.sendMessage(msg.key.remoteJid, {
         text: "⚠️ Aún estoy esperando tu ubicación para completar el fichaje."
       });
