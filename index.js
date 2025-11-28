@@ -253,7 +253,7 @@ async function iniciarBot() {
     // Si no es ubicación y estábamos esperando ubicación
     if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
       await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación."
+        text: "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
       });
       return;
     }
@@ -283,7 +283,7 @@ async function iniciarBot() {
       await sock.sendMessage(msg.key.remoteJid, {
         text:
           `Hola, ${nombre}.\n` +
-          `Para registrar tu *${accion}*, envíame ahora tu ubicación en tiempo real ` +
+          `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL ` +
           "usando el icono del clip 📎 → Ubicación."
       });
 
