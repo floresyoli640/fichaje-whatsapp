@@ -2,9 +2,11 @@
 //   CONFIG PARSE / BACK4APP
 // ===============================
 import Parse from "parse/node.js";
-Parse.initialize("Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ", "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP");
+Parse.initialize(
+  "Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ",
+  "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP"
+);
 Parse.serverURL = "https://parseapi.back4app.com/";
-
 
 // ===============================
 //   IMPORTS WHATSAPP / BAILEYS
@@ -16,7 +18,6 @@ import makeWASocket, {
   fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
-
 
 // ===============================
 //   SERVIDOR EXPRESS PARA EL QR
@@ -45,7 +46,6 @@ app.get("/qr", async (req, res) => {
 
 app.listen(PORT, () => console.log(`📡 Servidor Express en puerto ${PORT}`));
 
-
 // ===============================
 //   HELPERS PARA NÚMEROS
 // ===============================
@@ -53,7 +53,6 @@ function normalizarNumero(num) {
   // Deja solo dígitos
   return (num || "").toString().replace(/[^\d]/g, "");
 }
-
 
 // ===============================
 //   BASE DE DATOS
@@ -63,31 +62,44 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   const query = new Parse.Query(Employees);
 
   const numLimpio = normalizarNumero(numeroRaw);
-  const candidatos = new Set();
+  const ultimos9 = numLimpio.slice(-9); // últimos 9 dígitos del número
 
-  // Tal cual viene (solo dígitos)
-  candidatos.add(numLimpio);
+  console.log(
+    "🔎 Buscando empleado.",
+    "numeroRaw =", numeroRaw,
+    "numLimpio =", numLimpio,
+    "ultimos9 =", ultimos9
+  );
 
-  // Si empieza por 34, probamos también sin 34
-  if (numLimpio.startsWith("34") && numLimpio.length > 9) {
-    candidatos.add(numLimpio.slice(2));
-  }
-
-  // Si son 9 dígitos, probamos también con 34 delante
-  if (!numLimpio.startsWith("34") && numLimpio.length === 9) {
-    candidatos.add("34" + numLimpio);
-  }
-
-  const listaCandidatos = Array.from(candidatos);
-  console.log("🔎 Buscando empleado con teléfonos:", listaCandidatos);
-
-  query.containedIn("telefono", listaCandidatos);
+  // Buscamos registros cuyo campo "telefono" CONTENGA esos 9 dígitos
+  query.contains("telefono", ultimos9);
   query.include("empresa");
 
-  return await query.first();
+  const empleado = await query.first();
+
+  if (!empleado) {
+    console.log("❌ Ningún empleado encontrado para", numLimpio);
+  } else {
+    console.log(
+      "✅ Empleado encontrado:",
+      empleado.get("nombre"),
+      "| teléfono BD =",
+      empleado.get("telefono")
+    );
+  }
+
+  return empleado;
 }
 
-async function guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, latitud, longitud }) {
+async function guardarFichajeEnBack4app({
+  nombre,
+  dni,
+  numero,
+  empresa,
+  accion,
+  latitud,
+  longitud
+}) {
   const TimeEntry = Parse.Object.extend("TimeEntries");
   const entry = new TimeEntry();
   entry.set("nombre", nombre);
@@ -101,7 +113,10 @@ async function guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, 
   }
 
   if (latitud && longitud) {
-    entry.set("ubicacion", new Parse.GeoPoint({ latitude: latitud, longitude: longitud }));
+    entry.set(
+      "ubicacion",
+      new Parse.GeoPoint({ latitude: latitud, longitude: longitud })
+    );
   }
 
   try {
@@ -112,7 +127,6 @@ async function guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, 
   }
 }
 
-
 // ===============================
 //   BOT DE WHATSAPP
 // ===============================
@@ -121,9 +135,12 @@ const esperandoUbicacion = new Map();
 function obtenerTexto(msg) {
   if (!msg.message) return "";
   if (msg.message.conversation) return msg.message.conversation;
-  if (msg.message.extendedTextMessage) return msg.message.extendedTextMessage.text;
-  if (msg.message.buttonsResponseMessage) return msg.message.buttonsResponseMessage.selectedDisplayText;
-  if (msg.message.listResponseMessage) return msg.message.listResponseMessage.title;
+  if (msg.message.extendedTextMessage)
+    return msg.message.extendedTextMessage.text;
+  if (msg.message.buttonsResponseMessage)
+    return msg.message.buttonsResponseMessage.selectedDisplayText;
+  if (msg.message.listResponseMessage)
+    return msg.message.listResponseMessage.title;
   return "";
 }
 
@@ -153,7 +170,9 @@ async function iniciarBot() {
     if (connection === "close") {
       const errorCode = lastDisconnect?.error?.output?.statusCode;
       const debeReconectar = errorCode !== DisconnectReason.loggedOut;
-      console.log(`❌ Desconectado. Código: ${errorCode}. Reconectar: ${debeReconectar}`);
+      console.log(
+        `❌ Desconectado. Código: ${errorCode}. Reconectar: ${debeReconectar}`
+      );
       if (debeReconectar) iniciarBot();
     }
   });
@@ -226,7 +245,7 @@ async function iniciarBot() {
 
     // Respuesta genérica
     await sock.sendMessage(msg.key.remoteJid, {
-      text: 'Envía *ENTRADA* o *SALIDA* para fichar.'
+      text: "Envía *ENTRADA* o *SALIDA* para fichar."
     });
   });
 }
