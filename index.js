@@ -58,7 +58,6 @@ function normalizarNumero(num) {
 // ===============================
 //   BASE DE DATOS
 // ===============================
-
 async function buscarEmpleadoPorNumero(numeroRaw) {
   const Employees = Parse.Object.extend("Employees");
 
@@ -256,8 +255,8 @@ async function iniciarBot() {
           // ❌ Fuera de radio permitido
           await sock.sendMessage(msg.key.remoteJid, {
             text:
-              "🐦 Hay pájaro, no estás en la oficina.\n" +
-              "Para fichar debes estar en la oficina 😉"
+              "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
+              "Para fichar debes estar en la oficina 🔫😉"
           });
           return;
         }
@@ -267,11 +266,19 @@ async function iniciarBot() {
         );
       }
 
+      // 👉 Aquí decidimos qué guardar en TimeEntries.numero:
+      //    - Si el empleado tiene 'telefono' en la BD, usamos eso (normalizado).
+      //    - Si no, usamos el identificador normalizado (numero) como respaldo.
+      const telefonoBD = empleado.get("telefono");
+      const numeroParaRegistro = telefonoBD
+        ? normalizarNumero(telefonoBD)
+        : numero;
+
       // ✅ Dentro del radio permitido (o sin ubicación de empresa): se guarda
       await guardarFichajeEnBack4app({
         nombre,
         dni,
-        numero,
+        numero: numeroParaRegistro,
         empresa,
         accion,
         latitud,
