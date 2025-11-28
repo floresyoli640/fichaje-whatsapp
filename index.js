@@ -114,28 +114,34 @@ async function guardarFichajeEnBack4app({
   empresa,
   accion,
   latitud,
-  longitud
+  longitud,
 }) {
-  const TimeEntry = Parse.Object.extend("TimeEntry");
-  const timeEntry = new TimeEntry();
+  // 👇 IMPORTANTE: aquí va el nombre de la clase en Back4App
+  const TimeEntries = Parse.Object.extend("TimeEntries");
+  const entry = new TimeEntries();
 
-  timeEntry.set("nombre", nombre);
-  timeEntry.set("dni", dni);
-  timeEntry.set("numero", numero);
+  entry.set("nombre", nombre);
+  entry.set("dni", dni);
+  entry.set("numero", numero);
+  entry.set("accion", accion);
+  entry.set("fecha", new Date());
 
-  if (empresa) {
-    timeEntry.set("empresa", empresa);
+  if (empresa && typeof empresa.get === "function") {
+    entry.set("empresa", empresa);
   }
 
-  timeEntry.set("accion", accion);
-  timeEntry.set("latitud", latitud || null);
-  timeEntry.set("longitud", longitud || null);
+  if (latitud && longitud) {
+    entry.set(
+      "ubicacion",
+      new Parse.GeoPoint({ latitude: latitud, longitude: longitud })
+    );
+  }
 
   try {
-    await timeEntry.save();
-    console.log("✅ Fichaje guardado en Back4App");
-  } catch (error) {
-    console.error("❌ Error guardando fichaje:", error);
+    await entry.save();
+    console.log("✔ Fichaje guardado en TimeEntries (Back4App)");
+  } catch (e) {
+    console.error("❌ Error guardando fichaje:", e);
   }
 }
 
