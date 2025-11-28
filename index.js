@@ -33,20 +33,57 @@ app.get("/", (req, res) => {
 app.get("/qr", async (req, res) => {
   if (!ultimoQR) return res.send("QR aún no generado o ya conectado.");
   const qrImage = await QRCode.toDataURL(ultimoQR);
-  res.send(`<html><body style="text-align:center;"><h2>Escanea el QR</h2><img src="${qrImage}" style="width:300px;"></body></html>`);
+  res.send(`
+    <html>
+      <body style="text-align:center;">
+        <h2>Escanea el QR</h2>
+        <img src="${qrImage}" style="width:300px;">
+      </body>
+    </html>
+  `);
 });
 
 app.listen(PORT, () => console.log(`📡 Servidor Express en puerto ${PORT}`));
 
 
 // ===============================
+//   HELPERS PARA NÚMEROS
+// ===============================
+function normalizarNumero(num) {
+  // Deja solo dígitos
+  return (num || "").toString().replace(/[^\d]/g, "");
+}
+
+
+// ===============================
 //   BASE DE DATOS
 // ===============================
-async function buscarEmpleadoPorNumero(numero) {
+async function buscarEmpleadoPorNumero(numeroRaw) {
   const Employees = Parse.Object.extend("Employees");
   const query = new Parse.Query(Employees);
-  query.equalTo("telefono", numero);
+
+  const numLimpio = normalizarNumero(numeroRaw);
+  const candidatos = new Set();
+
+  // Tal cual viene (solo dígitos)
+  candidatos.add(numLimpio);
+
+  // Si empieza por 34, probamos también sin 34
+  if (numLimpio.startsWith("34") && numLimpio.length > 9) {
+    candidatos.add(numLimpio.slice(2));
+  }
+
+  // Si son 9 dígitos, probamos también con 34 delante
+  if (!numLimpio.startsWith("34") && numLimpio.length === 9) {
+    candidatos.add("34" + numLimpio);
+  }
+
+  const listaCandidatos = Array.from(candidatos);
+  console.log("🔎 Buscando empleado con teléfonos:", listaCandidatos);
+
+  query.containedIn("telefono", listaCandidatos);
   query.include("empresa");
+
   return await query.first();
 }
 
@@ -59,7 +96,7 @@ async function guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, 
   entry.set("accion", accion);
   entry.set("fecha", new Date());
 
-  if (empresa && typeof empresa.get === 'function') {
+  if (empresa && typeof empresa.get === "function") {
     entry.set("empresa", empresa);
   }
 
@@ -125,9 +162,13 @@ async function iniciarBot() {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
 
-    const numero = msg.key.remoteJid.replace("@s.whatsapp.net", "");
-    const texto = obtenerTexto(msg).trim().toUpperCase();
+    const rawJid = msg.key.remoteJid || "";
+    console.log("🔍 rawJid recibido:", rawJid);
 
+    const numero = normalizarNumero(rawJid.split("@")[0]);
+    console.log("📞 Número normalizado:", numero);
+
+    const texto = obtenerTexto(msg).trim().toUpperCase();
     console.log(`📩 Mensaje de ${numero}: ${texto}`);
 
     // Fichaje: ubicación
@@ -141,7 +182,15 @@ async function iniciarBot() {
       const lat = msg.message.locationMessage.degreesLatitude;
       const lon = msg.message.locationMessage.degreesLongitude;
 
-      await guardarFichajeEnBack4app({ nombre, dni, numero, empresa, accion, latitud: lat, longitud: lon });
+      await guardarFichajeEnBack4app({
+        nombre,
+        dni,
+        numero,
+        empresa,
+        accion,
+        latitud: lat,
+        longitud: lon
+      });
 
       await sock.sendMessage(msg.key.remoteJid, {
         text: `✅ Fichaje de ${accion} registrado para ${nombre} a las ${new Date().toLocaleTimeString()}.`
