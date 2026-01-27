@@ -2,9 +2,6 @@
 //   CONFIG PARSE / BACK4APP
 // ===============================
 import Parse from "parse/node.js";
-
-// ⚠️ Recomendado: mover estas claves a variables de entorno (process.env)
-// (Dejo tu código tal cual para no romper nada)
 Parse.initialize(
   "Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ",
   "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP"
@@ -56,25 +53,6 @@ app.listen(PORT, () => console.log(`📡 Servidor Express en puerto ${PORT}`));
 function normalizarNumero(num) {
   // Deja solo dígitos
   return (num || "").toString().replace(/[^\d]/g, "");
-}
-
-// ===============================
-//   NUEVO: DETECTAR UBICACIÓN REENVIADA
-// ===============================
-function esUbicacionReenviada(msg) {
-  const loc = msg?.message?.locationMessage;
-  if (!loc) return false;
-
-  const ctx = loc.contextInfo || {};
-
-  // Marcadores típicos de "forward"
-  if (ctx.isForwarded) return true;
-  if (typeof ctx.forwardingScore === "number" && ctx.forwardingScore > 0) return true;
-
-  // Si viene citada (a veces se usa para reenviar o “pasar” ubicación)
-  if (ctx.quotedMessage) return true;
-
-  return false;
 }
 
 // ===============================
@@ -182,6 +160,36 @@ function obtenerTexto(msg) {
 }
 
 // ===============================
+//   NUEVO: DETECTAR UBICACIÓN REENVIADA (MEJORADO)
+// ===============================
+function esUbicacionReenviada(mensajeReal) {
+  const loc = mensajeReal?.locationMessage;
+  if (!loc) return false;
+
+  const ctx = loc.contextInfo || {};
+
+  // Verificar si está marcado como reenviado
+  if (ctx.isForwarded) return true;
+
+  // Verificar score de reenvío
+  if (typeof ctx.forwardingScore === "number" && ctx.forwardingScore > 0) return true;
+
+  // Verificar si tiene mensaje citado (quoted)
+  if (ctx.quotedMessage) return true;
+
+  // Verificar si tiene stanzaId (indica reenvío)
+  if (ctx.stanzaId) return true;
+
+  // Verificar si tiene participant (indica que viene de un grupo/reenvío)
+  if (ctx.participant) return true;
+
+  // Verificar si tiene remoteJid en contexto (señal de reenvío)
+  if (ctx.remoteJid) return true;
+
+  return false;
+}
+
+// ===============================
 //   WHATSAPP BOT
 // ===============================
 async function iniciarBot() {
@@ -242,8 +250,8 @@ async function iniciarBot() {
     //  FICHAJE: UBICACIÓN
     // ===========================
     if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
-      // ✅ MEJORA: NO ADMITIR UBICACIONES REENVIADAS
-      if (esUbicacionReenviada(msg)) {
+      // ✅ MEJORA: NO ADMITIR UBICACIONES REENVIADAS (MEJORADO)
+      if (esUbicacionReenviada(msg.message)) {
         await sock.sendMessage(msg.key.remoteJid, {
           text: "❌ Error. Intenta de nuevo."
         });
