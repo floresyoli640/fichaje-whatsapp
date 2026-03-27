@@ -27,22 +27,57 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let ultimoQR = null;
+let estadoWA = "iniciando";
+let ultimoErrorWA = null;
 
 app.get("/", (req, res) => {
   res.send("Servidor funcionando. Ve a /qr para escanear el código.");
 });
 
+app.get("/estado", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+
+  res.json({
+    estadoWA,
+    hayQR: !!ultimoQR,
+    ultimoErrorWA
+  });
+});
+
 app.get("/qr", async (req, res) => {
-  if (!ultimoQR) return res.send("QR aún no generado o ya conectado.");
-  const qrImage = await QRCode.toDataURL(ultimoQR);
-  res.send(`
-    <html>
-      <body style="text-align:center;">
-        <h2>Escanea el QR</h2>
-        <img src="${qrImage}" style="width:300px;">
-      </body>
-    </html>
-  `);
+  try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+
+    if (!ultimoQR) {
+      return res.send("QR aún no generado o ya conectado.");
+    }
+
+    const qrImage = await QRCode.toDataURL(ultimoQR);
+
+    res.send(`
+      <html>
+        <head>
+          <meta charset="UTF-8" />
+          <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+          <meta http-equiv="Pragma" content="no-cache" />
+          <meta http-equiv="Expires" content="0" />
+          <title>QR WhatsApp</title>
+        </head>
+        <body style="text-align:center;font-family:Arial;padding-top:30px;">
+          <h2>Escanea el QR</h2>
+          <img src="${qrImage}" style="width:300px;">
+          <p>Estado: ${estadoWA}</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("❌ Error mostrando QR:", error);
+    res.status(500).send("Error generando el QR.");
+  }
 });
 
 app.listen(PORT, () => console.log(`📡 Servidor Express en puerto ${PORT}`));
@@ -51,7 +86,6 @@ app.listen(PORT, () => console.log(`📡 Servidor Express en puerto ${PORT}`));
 //   HELPERS PARA NÚMEROS
 // ===============================
 function normalizarNumero(num) {
-  // Deja solo dígitos
   return (num || "").toString().replace(/[^\d]/g, "");
 }
 
@@ -62,7 +96,7 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   const Employees = Parse.Object.extend("Employees");
 
   const numLimpio = normalizarNumero(numeroRaw || "");
-  const ultimos9 = numLimpio.slice(-9); // últimos 9 dígitos del número
+  const ultimos9 = numLimpio.slice(-9);
 
   console.log(
     "🔎 Buscando empleado.",
@@ -71,18 +105,14 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
     "ultimos9 =", ultimos9
   );
 
-  // Detectamos si parece un teléfono español normal (34 + 9 dígitos)
   const esTelefonoEspanol =
     numLimpio.startsWith("34") && numLimpio.length >= 11 && numLimpio.length <= 13;
 
   let query = new Parse.Query(Employees);
 
   if (esTelefonoEspanol) {
-    // Buscamos por teléfono (como antes, usando los últimos 9 dígitos por seguridad)
     query.contains("telefono", ultimos9);
   } else {
-    // Si no parece un teléfono, asumimos que es un waId interno de WhatsApp
-    // Necesitas tener una columna "waId" (String) en Employees para que esto funcione
     query.equalTo("waId", numLimpio);
   }
 
@@ -115,7 +145,6 @@ async function guardarFichajeEnBack4app({
   latitud,
   longitud,
 }) {
-  // 👇 IMPORTANTE: aquí va el nombre de la clase en Back4App
   const TimeEntries = Parse.Object.extend("TimeEntries");
   const entry = new TimeEntries();
 
@@ -150,11 +179,9 @@ async function guardarFichajeEnBack4app({
 function obtenerTexto(msg) {
   const message = msg.message;
 
-  if (message.conversation) return message.conversation;
-  if (message.extendedTextMessage)
-    return message.extendedTextMessage.text || "";
-  if (message.imageMessage && message.imageMessage.caption)
-    return message.imageMessage.caption;
+  if (message?.conversation) return message.conversation;
+  if (message?.extendedTextMessage) return message.extendedTextMessage.text || "";
+  if (message?.imageMessage?.caption) return message.imageMessage.caption;
 
   return "";
 }
@@ -163,200 +190,237 @@ function obtenerTexto(msg) {
 //   WHATSAPP BOT
 // ===============================
 async function iniciarBot() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
-  const { version } = await fetchLatestBaileysVersion();
+  try {
+    estadoWA = "iniciando";
+    ultimoErrorWA = null;
 
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: true
-  });
+    // CAMBIO IMPORTANTE:
+    // al cambiar el nombre de la carpeta, fuerzas una sesión nueva
+    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_nueva");
+    const { version } = await fetchLatestBaileysVersion();
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    console.log("🚀 Iniciando Baileys con versión:", version);
 
-    if (qr) {
-      ultimoQR = qr;
-      console.log("⚠️ QR recibido. Ve a /qr para escanearlo.");
-    }
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      printQRInTerminal: true
+    });
 
-    if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !==
-        DisconnectReason.loggedOut;
-      console.log(
-        "❌ Conexión cerrada. ¿Reconectar?",
-        shouldReconnect ? "Sí" : "No"
-      );
-      if (shouldReconnect) iniciarBot();
-    } else if (connection === "open") {
-      ultimoQR = null;
-      console.log("✅ Conectado a WhatsApp");
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  // Mapa para almacenar quién ha pedido fichaje y está enviando ubicación
-  const esperandoUbicacion = new Map();
-
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
-
-    const rawJid = msg.key.remoteJid || "";
-    const rawParticipant = msg.key.participant || "";
-
-    console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
-
-    const baseId = rawParticipant || rawJid;
-    const numero = normalizarNumero(baseId.split("@")[0]);
-    console.log("📞 Identificador normalizado:", numero);
-
-    const texto = obtenerTexto(msg).trim().toUpperCase();
-    console.log(`📩 Mensaje de ${numero}: ${texto}`);
-
-    // ===========================
-    //  FICHAJE: UBICACIÓN
-    // ===========================
-    if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
-      const { accion, empleado } = esperandoUbicacion.get(numero);
-      esperandoUbicacion.delete(numero);
-
-      const nombre = empleado.get("nombre") || "-";
-      const dni = empleado.get("dni") || "-";
-      const empresa = empleado.get("empresa");
-
-      const latitud = msg.message.locationMessage.degreesLatitude;
-      const longitud = msg.message.locationMessage.degreesLongitude;
+    sock.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect, qr } = update;
 
       console.log(
-        `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
+        "connection.update:",
+        JSON.stringify(
+          {
+            connection,
+            hasQr: !!qr,
+            lastDisconnect:
+              lastDisconnect?.error?.message ||
+              lastDisconnect?.error?.output?.payload ||
+              null
+          },
+          null,
+          2
+        )
       );
 
-      // 🧭 Punto de fichaje
-      const puntoFichaje = new Parse.GeoPoint({
-        latitude: latitud,
-        longitude: longitud
-      });
+      if (qr) {
+        ultimoQR = qr;
+        estadoWA = "qr_generado";
+        console.log("📲 Código QR generado. Ve a /qr para escanearlo.");
+      }
 
-      // 🏢 Ubicación de la empresa (GeoPoint en campo "ubicacion")
-      const ubicacionEmpresa = empresa?.get("ubicacion");
+      if (connection === "close") {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
-      if (ubicacionEmpresa instanceof Parse.GeoPoint) {
-        const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
-        const distanciaMetros = distanciaKm * 1000;
+        estadoWA = "cerrado";
+        ultimoErrorWA =
+          lastDisconnect?.error?.message ||
+          JSON.stringify(lastDisconnect?.error?.output?.payload || null);
 
-        console.log(
-          `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
-        );
+        console.log("❌ Conexión cerrada. Código:", statusCode);
+        console.log("❌ ¿Reconectar?", shouldReconnect ? "Sí" : "No");
 
-        if (distanciaMetros > 40) {
-          // ❌ Fuera de radio permitido
+        if (shouldReconnect) {
+          setTimeout(() => {
+            iniciarBot();
+          }, 3000);
+        } else {
+          console.log("⚠️ Sesión cerrada definitivamente. Habrá que regenerar QR.");
+        }
+      } else if (connection === "open") {
+        ultimoQR = null;
+        estadoWA = "conectado";
+        ultimoErrorWA = null;
+        console.log("✅ Conectado a WhatsApp");
+      }
+    });
+
+    sock.ev.on("creds.update", async () => {
+      try {
+        await saveCreds();
+        console.log("💾 Credenciales guardadas");
+      } catch (error) {
+        console.error("❌ Error guardando credenciales:", error);
+      }
+    });
+
+    const esperandoUbicacion = new Map();
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+      try {
+        const msg = messages[0];
+        if (!msg?.message || msg.key?.fromMe) return;
+
+        const rawJid = msg.key.remoteJid || "";
+        const rawParticipant = msg.key.participant || "";
+
+        console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
+
+        const baseId = rawParticipant || rawJid;
+        const numero = normalizarNumero(baseId.split("@")[0]);
+        console.log("📞 Identificador normalizado:", numero);
+
+        const texto = obtenerTexto(msg).trim().toUpperCase();
+        console.log(`📩 Mensaje de ${numero}: ${texto}`);
+
+        // ===========================
+        //  FICHAJE: UBICACIÓN
+        // ===========================
+        if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
+          const { accion, empleado } = esperandoUbicacion.get(numero);
+          esperandoUbicacion.delete(numero);
+
+          const nombre = empleado.get("nombre") || "-";
+          const dni = empleado.get("dni") || "-";
+          const empresa = empleado.get("empresa");
+
+          const latitud = msg.message.locationMessage.degreesLatitude;
+          const longitud = msg.message.locationMessage.degreesLongitude;
+
+          console.log(
+            `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
+          );
+
+          const puntoFichaje = new Parse.GeoPoint({
+            latitude: latitud,
+            longitude: longitud
+          });
+
+          const ubicacionEmpresa = empresa?.get("ubicacion");
+
+          if (ubicacionEmpresa instanceof Parse.GeoPoint) {
+            const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
+            const distanciaMetros = distanciaKm * 1000;
+
+            console.log(
+              `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
+            );
+
+            if (distanciaMetros > 40) {
+              await sock.sendMessage(msg.key.remoteJid, {
+                text:
+                  "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
+                  "Para fichar debes estar en la oficina 🔫😉"
+              });
+              return;
+            }
+          } else {
+            console.log(
+              "⚠️ La empresa no tiene 'ubicacion' (GeoPoint) configurada. Se admite fichaje igualmente."
+            );
+          }
+
+          const telefonoBD = empleado.get("telefono");
+          const numeroParaRegistro = telefonoBD
+            ? normalizarNumero(telefonoBD)
+            : numero;
+
+          await guardarFichajeEnBack4app({
+            nombre,
+            dni,
+            numero: numeroParaRegistro,
+            empresa,
+            accion,
+            latitud,
+            longitud
+          });
+
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
+          });
+
+          return;
+        }
+
+        if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
           await sock.sendMessage(msg.key.remoteJid, {
             text:
-              "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
-              "Para fichar debes estar en la oficina 🔫😉"
+              "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
           });
           return;
         }
-      } else {
-        console.log(
-          "⚠️ La empresa no tiene 'ubicacion' (GeoPoint) configurada. Se admite fichaje igualmente."
-        );
-      }
 
-      // 👉 Aquí decidimos qué guardar en TimeEntries.numero:
-      //    - Si el empleado tiene 'telefono' en la BD, usamos eso (normalizado).
-      //    - Si no, usamos el identificador normalizado (numero) como respaldo.
-      const telefonoBD = empleado.get("telefono");
-      const numeroParaRegistro = telefonoBD
-        ? normalizarNumero(telefonoBD)
-        : numero;
+        // ===========================
+        //  FICHAJE: ENTRADA / SALIDA
+        // ===========================
+        if (texto === "ENTRADA" || texto === "SALIDA") {
+          const accion = texto;
 
-      // ✅ Dentro del radio permitido (o sin ubicación de empresa): se guarda
-      await guardarFichajeEnBack4app({
-        nombre,
-        dni,
-        numero: numeroParaRegistro,
-        empresa,
-        accion,
-        latitud,
-        longitud
-      });
+          const empleado = await buscarEmpleadoPorNumero(numero);
 
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
-      });
+          if (!empleado) {
+            await sock.sendMessage(msg.key.remoteJid, {
+              text:
+                "❌ No te encuentro en la base de datos.\n" +
+                "Por favor, contacta con administración."
+            });
+            return;
+          }
 
-      return;
-    }
+          const nombre = empleado.get("nombre") || "-";
 
-    // Si no es ubicación y estábamos esperando ubicación
-    if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text:
-          "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
-      });
-      return;
-    }
+          esperandoUbicacion.set(numero, { accion, empleado });
 
-    // ===========================
-    //  FICHAJE: ENTRADA / SALIDA
-    // ===========================
-    if (texto === "ENTRADA" || texto === "SALIDA") {
-      const accion = texto;
+          await sock.sendMessage(msg.key.remoteJid, {
+            text:
+              `Hola, ${nombre}.\n` +
+              `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL ` +
+              "usando el icono del clip 📎 → Ubicación."
+          });
 
-      const empleado = await buscarEmpleadoPorNumero(numero);
+          return;
+        }
 
-      if (!empleado) {
+        if (!esperandoUbicacion.has(numero)) {
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: "Hola 👋. Escribe *ENTRADA* o *SALIDA* para fichar."
+          });
+          return;
+        }
+
+        if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
+          await sock.sendMessage(msg.key.remoteJid, {
+            text: "⚠️ Aún estoy esperando tu ubicación para completar el fichaje."
+          });
+          return;
+        }
+
         await sock.sendMessage(msg.key.remoteJid, {
-          text:
-            "❌ No te encuentro en la base de datos.\n" +
-            "Por favor, contacta con administración."
+          text: "Envía *ENTRADA* o *SALIDA* para fichar."
         });
-        return;
+      } catch (error) {
+        console.error("❌ Error procesando mensaje:", error);
       }
-
-      const nombre = empleado.get("nombre") || "-";
-      const dni = empleado.get("dni") || "-";
-      const empresa = empleado.get("empresa");
-
-      // Guardamos en el mapa que esperamos la ubicación de este número
-      esperandoUbicacion.set(numero, { accion, empleado });
-
-      await sock.sendMessage(msg.key.remoteJid, {
-        text:
-          `Hola, ${nombre}.\n` +
-          `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL ` +
-          "usando el icono del clip 📎 → Ubicación."
-      });
-
-      return;
-    }
-
-    // Si llega un mensaje de texto normal y no está en flujo de fichaje
-    if (!esperandoUbicacion.has(numero)) {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "Hola 👋. Escribe *ENTRADA* o *SALIDA* para fichar."
-      });
-      return;
-    }
-
-    // Si está en flujo de fichaje pero manda otra cosa
-    if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: "⚠️ Aún estoy esperando tu ubicación para completar el fichaje."
-      });
-      return;
-    }
-
-    // Respuesta genérica (por si acaso)
-    await sock.sendMessage(msg.key.remoteJid, {
-      text: "Envía *ENTRADA* o *SALIDA* para fichar."
     });
-  });
+  } catch (error) {
+    estadoWA = "error_inicio";
+    ultimoErrorWA = error?.message || String(error);
+    console.error("❌ Error iniciando el bot:", error);
+  }
 }
 
 iniciarBot();
-
