@@ -194,7 +194,7 @@ async function iniciarBot() {
     estadoWA = "iniciando";
     ultimoErrorWA = null;
 
-    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_reset2");
+    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_reset3");
     const { version } = await fetchLatestBaileysVersion();
 
     console.log("🚀 Iniciando Baileys con versión:", version);
@@ -284,9 +284,6 @@ async function iniciarBot() {
         const texto = obtenerTexto(msg).trim().toUpperCase();
         console.log(`📩 Mensaje de ${numero}: ${texto}`);
 
-        // ===========================
-        //  FICHAJE: UBICACIÓN
-        // ===========================
         if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
           const { accion, empleado } = esperandoUbicacion.get(numero);
           esperandoUbicacion.delete(numero);
@@ -361,9 +358,6 @@ async function iniciarBot() {
           return;
         }
 
-        // ===========================
-        //  FICHAJE: ENTRADA / SALIDA
-        // ===========================
         if (texto === "ENTRADA" || texto === "SALIDA") {
           const accion = texto;
 
@@ -385,8 +379,7 @@ async function iniciarBot() {
           await sock.sendMessage(msg.key.remoteJid, {
             text:
               `Hola, ${nombre}.\n` +
-              `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL ` +
-              "usando el icono del clip 📎 → Ubicación."
+              `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL usando el icono del clip 📎 → Ubicación.`
           });
 
           return;
