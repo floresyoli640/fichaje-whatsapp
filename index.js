@@ -194,17 +194,14 @@ async function iniciarBot() {
     estadoWA = "iniciando";
     ultimoErrorWA = null;
 
-    // CAMBIO IMPORTANTE:
-    // al cambiar el nombre de la carpeta, fuerzas una sesión nueva
-    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_nueva");
+    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_reset2");
     const { version } = await fetchLatestBaileysVersion();
 
     console.log("🚀 Iniciando Baileys con versión:", version);
 
     const sock = makeWASocket({
       version,
-      auth: state,
-      printQRInTerminal: true
+      auth: state
     });
 
     sock.ev.on("connection.update", (update) => {
