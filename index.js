@@ -31,7 +31,7 @@ let ultimoQR = null;
 let estadoWA = "iniciando";
 let ultimoErrorWA = null;
 
-// NUEVO: variables para recordatorios
+// Variables para recordatorios
 let sockWA = null;
 let recordatoriosIniciados = false;
 
@@ -134,7 +134,11 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
       "| teléfono BD =",
       empleado.get("telefono"),
       "| waId BD =",
-      empleado.get("waId")
+      empleado.get("waId"),
+      "| activo =",
+      empleado.get("activo"),
+      "| exentoFichaje =",
+      empleado.get("exentoFichaje")
     );
   }
 
@@ -208,8 +212,11 @@ async function obtenerEmpleadosActivos() {
   const Employees = Parse.Object.extend("Employees");
   const query = new Parse.Query(Employees);
 
-  // Si en Employees tienes un campo activo=true, puedes descomentar esta línea:
-  // query.equalTo("activo", true);
+  // Solo empleados activos
+  query.equalTo("activo", true);
+
+  // Excluye jefe o personas exentas de fichaje
+  query.notEqualTo("exentoFichaje", true);
 
   query.include("empresa");
   query.limit(1000);
@@ -361,7 +368,7 @@ async function iniciarBot() {
       auth: state
     });
 
-    // NUEVO: guardamos el socket para poder usarlo en los recordatorios
+    // Guardamos el socket para usarlo en recordatorios
     sockWA = sock;
 
     sock.ev.on("connection.update", (update) => {
@@ -416,7 +423,7 @@ async function iniciarBot() {
 
         console.log("✅ Conectado a WhatsApp");
 
-        // NUEVO: iniciamos los recordatorios cuando WhatsApp ya está conectado
+        // Iniciamos los recordatorios cuando WhatsApp ya está conectado
         iniciarRecordatorios();
       }
     });
@@ -533,6 +540,16 @@ async function iniciarBot() {
               text:
                 "❌ No te encuentro en la base de datos.\n" +
                 "Por favor, contacta con administración."
+            });
+            return;
+          }
+
+          // BLOQUEO PARA JEFE O EMPLEADOS INACTIVOS
+          if (empleado.get("activo") === false || empleado.get("exentoFichaje") === true) {
+            await sock.sendMessage(msg.key.remoteJid, {
+              text:
+                "⚠️ Tu usuario no está habilitado para fichar.\n" +
+                "Si crees que es un error, contacta con administración."
             });
             return;
           }
