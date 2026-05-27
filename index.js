@@ -19,6 +19,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 
 import QRCode from "qrcode";
+import cron from "node-cron";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -29,6 +30,10 @@ const PORT = process.env.PORT || 3000;
 let ultimoQR = null;
 let estadoWA = "iniciando";
 let ultimoErrorWA = null;
+
+// NUEVO: variables para recordatorios
+let sockWA = null;
+let recordatoriosIniciados = false;
 
 app.get("/", (req, res) => {
   res.send("Servidor funcionando. Ve a /qr para escanear el código.");
@@ -187,6 +192,158 @@ function obtenerTexto(msg) {
 }
 
 // ===============================
+//   RECORDATORIOS DE FICHAJE
+// ===============================
+function obtenerRangoDiaActual() {
+  const inicio = new Date();
+  inicio.setHours(0, 0, 0, 0);
+
+  const fin = new Date();
+  fin.setHours(23, 59, 59, 999);
+
+  return { inicio, fin };
+}
+
+async function obtenerEmpleadosActivos() {
+  const Employees = Parse.Object.extend("Employees");
+  const query = new Parse.Query(Employees);
+
+  // Si en Employees tienes un campo activo=true, puedes descomentar esta línea:
+  // query.equalTo("activo", true);
+
+  query.include("empresa");
+  query.limit(1000);
+
+  return await query.find();
+}
+
+function obtenerNumeroWhatsAppEmpleado(empleado) {
+  const telefono = normalizarNumero(empleado.get("telefono"));
+  const waId = normalizarNumero(empleado.get("waId"));
+
+  let numero = telefono || waId;
+
+  if (!numero) return null;
+
+  // Si es teléfono español de 9 cifras, añadimos 34 delante
+  if (numero.length === 9) {
+    numero = "34" + numero;
+  }
+
+  return numero;
+}
+
+async function empleadoYaHaFichadoHoy(empleado, accion) {
+  const TimeEntries = Parse.Object.extend("TimeEntries");
+  const query = new Parse.Query(TimeEntries);
+
+  const { inicio, fin } = obtenerRangoDiaActual();
+
+  const telefono = normalizarNumero(empleado.get("telefono"));
+  const waId = normalizarNumero(empleado.get("waId"));
+
+  const numerosPosibles = [];
+
+  if (telefono) {
+    numerosPosibles.push(telefono);
+
+    if (telefono.length === 9) {
+      numerosPosibles.push("34" + telefono);
+    }
+  }
+
+  if (waId) {
+    numerosPosibles.push(waId);
+  }
+
+  if (numerosPosibles.length === 0) {
+    return false;
+  }
+
+  query.containedIn("numero", numerosPosibles);
+  query.equalTo("accion", accion);
+  query.greaterThanOrEqualTo("fecha", inicio);
+  query.lessThanOrEqualTo("fecha", fin);
+
+  const fichaje = await query.first();
+
+  return !!fichaje;
+}
+
+async function enviarRecordatorioFichaje(accion) {
+  try {
+    if (!sockWA || estadoWA !== "conectado") {
+      console.log("⚠️ WhatsApp no está conectado. No se envían recordatorios.");
+      return;
+    }
+
+    console.log(`⏰ Revisando recordatorios de ${accion}...`);
+
+    const empleados = await obtenerEmpleadosActivos();
+
+    for (const empleado of empleados) {
+      const nombre = empleado.get("nombre") || "empleado/a";
+      const numero = obtenerNumeroWhatsAppEmpleado(empleado);
+
+      if (!numero) {
+        console.log(`⚠️ ${nombre} no tiene teléfono ni waId.`);
+        continue;
+      }
+
+      const yaHaFichado = await empleadoYaHaFichadoHoy(empleado, accion);
+
+      if (yaHaFichado) {
+        console.log(`✅ ${nombre} ya tiene ${accion} registrada hoy.`);
+        continue;
+      }
+
+      const jid = `${numero}@s.whatsapp.net`;
+
+      const texto =
+        accion === "ENTRADA"
+          ? `Buenos días, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *ENTRADA* de hoy.\n\nPara fichar, responde con la palabra *ENTRADA*.`
+          : `Hola, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *SALIDA* de hoy.\n\nPara fichar, responde con la palabra *SALIDA*.`;
+
+      await sockWA.sendMessage(jid, { text: texto });
+
+      console.log(`📨 Recordatorio de ${accion} enviado a ${nombre} (${numero})`);
+    }
+  } catch (error) {
+    console.error(`❌ Error enviando recordatorios de ${accion}:`, error);
+  }
+}
+
+function iniciarRecordatorios() {
+  if (recordatoriosIniciados) return;
+
+  recordatoriosIniciados = true;
+
+  // Lunes a viernes a las 08:05
+  cron.schedule(
+    "5 8 * * 1-5",
+    async () => {
+      await enviarRecordatorioFichaje("ENTRADA");
+    },
+    {
+      timezone: "Europe/Madrid"
+    }
+  );
+
+  // Lunes a viernes a las 15:05
+  cron.schedule(
+    "5 15 * * 1-5",
+    async () => {
+      await enviarRecordatorioFichaje("SALIDA");
+    },
+    {
+      timezone: "Europe/Madrid"
+    }
+  );
+
+  console.log("⏰ Recordatorios programados: 08:05 ENTRADA y 15:05 SALIDA.");
+}
+
+// ===============================
 //   WHATSAPP BOT
 // ===============================
 async function iniciarBot() {
@@ -203,6 +360,9 @@ async function iniciarBot() {
       version,
       auth: state
     });
+
+    // NUEVO: guardamos el socket para poder usarlo en los recordatorios
+    sockWA = sock;
 
     sock.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -252,7 +412,12 @@ async function iniciarBot() {
         ultimoQR = null;
         estadoWA = "conectado";
         ultimoErrorWA = null;
+        sockWA = sock;
+
         console.log("✅ Conectado a WhatsApp");
+
+        // NUEVO: iniciamos los recordatorios cuando WhatsApp ya está conectado
+        iniciarRecordatorios();
       }
     });
 
