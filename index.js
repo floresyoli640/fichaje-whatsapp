@@ -2,10 +2,12 @@
 //   CONFIG PARSE / BACK4APP
 // ===============================
 import Parse from "parse/node.js";
+
 Parse.initialize(
   "Yo7aFmDqSDkWaUhdG4INURZzRQ0qIYNJohfBFajJ",
   "Sqmmtd0qegDYFAEyPW0phkHYw3aMFlAMCKDrEiQP"
 );
+
 Parse.serverURL = "https://parseapi.back4app.com/";
 
 // ===============================
@@ -31,10 +33,34 @@ let ultimoQR = null;
 let estadoWA = "iniciando";
 let ultimoErrorWA = null;
 
-// Variables para recordatorios
+// Socket global
 let sockWA = null;
+
+// Evita iniciar los cron varias veces
 let recordatoriosIniciados = false;
 
+// Estado global de usuarios esperando ubicación
+const esperandoUbicacion = new Map();
+
+// Evita procesar el mismo mensaje dos veces
+const mensajesProcesados = new Set();
+
+// Evita reconexiones simultáneas
+let reconectando = false;
+
+// ===============================
+//   MENSAJE PARA CLIENTES / NO FICHAJE
+// ===============================
+const mensajeNoAtencionCliente =
+  "Hola 👋\n\n" +
+  "Este número de WhatsApp no está disponible.\n\n" +
+  "No prestamos atención al cliente mediante WhatsApp en este teléfono.\n\n" +
+  "Puedes llamarnos o consultar las distintas formas de contacto en:\n" +
+  "https://laprimera.net/";
+
+// ===============================
+//   RUTAS EXPRESS
+// ===============================
 app.get("/", (req, res) => {
   res.send("Servidor funcionando. Ve a /qr para escanear el código.");
 });
@@ -113,7 +139,7 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   const esTelefonoEspanol =
     numLimpio.startsWith("34") && numLimpio.length >= 11 && numLimpio.length <= 13;
 
-  let query = new Parse.Query(Employees);
+  const query = new Parse.Query(Employees);
 
   if (esTelefonoEspanol) {
     query.contains("telefono", ultimos9);
@@ -152,7 +178,7 @@ async function guardarFichajeEnBack4app({
   empresa,
   accion,
   latitud,
-  longitud,
+  longitud
 }) {
   const TimeEntries = Parse.Object.extend("TimeEntries");
   const entry = new TimeEntries();
@@ -170,7 +196,10 @@ async function guardarFichajeEnBack4app({
   if (latitud && longitud) {
     entry.set(
       "ubicacion",
-      new Parse.GeoPoint({ latitude: latitud, longitude: longitud })
+      new Parse.GeoPoint({
+        latitude: latitud,
+        longitude: longitud
+      })
     );
   }
 
@@ -212,10 +241,7 @@ async function obtenerEmpleadosActivos() {
   const Employees = Parse.Object.extend("Employees");
   const query = new Parse.Query(Employees);
 
-  // Solo empleados activos
   query.equalTo("activo", true);
-
-  // Excluye jefe o personas exentas de fichaje
   query.notEqualTo("exentoFichaje", true);
 
   query.include("empresa");
@@ -232,7 +258,6 @@ function obtenerNumeroWhatsAppEmpleado(empleado) {
 
   if (!numero) return null;
 
-  // Si es teléfono español de 9 cifras, añadimos 34 delante
   if (numero.length === 9) {
     numero = "34" + numero;
   }
@@ -321,11 +346,13 @@ async function enviarRecordatorioFichaje(accion) {
 }
 
 function iniciarRecordatorios() {
-  if (recordatoriosIniciados) return;
+  if (recordatoriosIniciados) {
+    console.log("⏰ Los recordatorios ya estaban iniciados. No se duplican.");
+    return;
+  }
 
   recordatoriosIniciados = true;
 
-  // Lunes a viernes a las 08:05
   cron.schedule(
     "5 8 * * 1-5",
     async () => {
@@ -336,7 +363,6 @@ function iniciarRecordatorios() {
     }
   );
 
-  // Lunes a viernes a las 15:05
   cron.schedule(
     "5 15 * * 1-5",
     async () => {
@@ -351,12 +377,37 @@ function iniciarRecordatorios() {
 }
 
 // ===============================
+//   CERRAR SOCKET ANTERIOR
+// ===============================
+function cerrarSocketAnterior() {
+  if (!sockWA) return;
+
+  try {
+    console.log("♻️ Cerrando socket anterior antes de crear uno nuevo...");
+
+    if (sockWA.ev?.removeAllListeners) {
+      sockWA.ev.removeAllListeners();
+    }
+
+    if (typeof sockWA.end === "function") {
+      sockWA.end(new Error("Reiniciando socket"));
+    } else if (sockWA.ws?.close) {
+      sockWA.ws.close();
+    }
+  } catch (e) {
+    console.log("⚠️ No se pudo cerrar el socket anterior:", e?.message || e);
+  }
+}
+
+// ===============================
 //   WHATSAPP BOT
 // ===============================
 async function iniciarBot() {
   try {
     estadoWA = "iniciando";
     ultimoErrorWA = null;
+
+    cerrarSocketAnterior();
 
     const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_reset3");
     const { version } = await fetchLatestBaileysVersion();
@@ -368,7 +419,6 @@ async function iniciarBot() {
       auth: state
     });
 
-    // Guardamos el socket para usarlo en recordatorios
     sockWA = sock;
 
     sock.ev.on("connection.update", (update) => {
@@ -409,8 +459,19 @@ async function iniciarBot() {
         console.log("❌ ¿Reconectar?", shouldReconnect ? "Sí" : "No");
 
         if (shouldReconnect) {
-          setTimeout(() => {
-            iniciarBot();
+          if (reconectando) {
+            console.log("⚠️ Ya hay una reconexión en curso. No se lanza otra.");
+            return;
+          }
+
+          reconectando = true;
+
+          setTimeout(async () => {
+            try {
+              await iniciarBot();
+            } finally {
+              reconectando = false;
+            }
           }, 3000);
         } else {
           console.log("⚠️ Sesión cerrada definitivamente. Habrá que regenerar QR.");
@@ -423,7 +484,6 @@ async function iniciarBot() {
 
         console.log("✅ Conectado a WhatsApp");
 
-        // Iniciamos los recordatorios cuando WhatsApp ya está conectado
         iniciarRecordatorios();
       }
     });
@@ -437,153 +497,171 @@ async function iniciarBot() {
       }
     });
 
-    const esperandoUbicacion = new Map();
-
     sock.ev.on("messages.upsert", async ({ messages }) => {
       try {
-        const msg = messages[0];
-        if (!msg?.message || msg.key?.fromMe) return;
+        for (const msg of messages) {
+          if (!msg?.message || msg.key?.fromMe) continue;
 
-        const rawJid = msg.key.remoteJid || "";
-        const rawParticipant = msg.key.participant || "";
+          const rawJid = msg.key.remoteJid || "";
+          const messageId = `${rawJid}:${msg.key.id}`;
 
-        console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
+          if (mensajesProcesados.has(messageId)) {
+            console.log("⚠️ Mensaje duplicado ignorado:", messageId);
+            continue;
+          }
 
-        const baseId = rawParticipant || rawJid;
-        const numero = normalizarNumero(baseId.split("@")[0]);
-        console.log("📞 Identificador normalizado:", numero);
+          mensajesProcesados.add(messageId);
 
-        const texto = obtenerTexto(msg).trim().toUpperCase();
-        console.log(`📩 Mensaje de ${numero}: ${texto}`);
+          setTimeout(() => {
+            mensajesProcesados.delete(messageId);
+          }, 5 * 60 * 1000);
 
-        if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
-          const { accion, empleado } = esperandoUbicacion.get(numero);
-          esperandoUbicacion.delete(numero);
+          const rawParticipant = msg.key.participant || "";
 
-          const nombre = empleado.get("nombre") || "-";
-          const dni = empleado.get("dni") || "-";
-          const empresa = empleado.get("empresa");
+          console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
-          const latitud = msg.message.locationMessage.degreesLatitude;
-          const longitud = msg.message.locationMessage.degreesLongitude;
+          const baseId = rawParticipant || rawJid;
+          const numero = normalizarNumero(baseId.split("@")[0]);
 
-          console.log(
-            `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
-          );
+          console.log("📞 Identificador normalizado:", numero);
 
-          const puntoFichaje = new Parse.GeoPoint({
-            latitude: latitud,
-            longitude: longitud
-          });
+          const texto = obtenerTexto(msg).trim().toUpperCase();
 
-          const ubicacionEmpresa = empresa?.get("ubicacion");
+          console.log(`📩 Mensaje de ${numero}: ${texto}`);
 
-          if (ubicacionEmpresa instanceof Parse.GeoPoint) {
-            const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
-            const distanciaMetros = distanciaKm * 1000;
+          // ===============================
+          //   SI ESTÁ ESPERANDO UBICACIÓN
+          // ===============================
+          if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
+            const { accion, empleado } = esperandoUbicacion.get(numero);
+            esperandoUbicacion.delete(numero);
+
+            const nombre = empleado.get("nombre") || "-";
+            const dni = empleado.get("dni") || "-";
+            const empresa = empleado.get("empresa");
+
+            const latitud = msg.message.locationMessage.degreesLatitude;
+            const longitud = msg.message.locationMessage.degreesLongitude;
 
             console.log(
-              `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
+              `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
             );
 
-            if (distanciaMetros > 40) {
+            const puntoFichaje = new Parse.GeoPoint({
+              latitude: latitud,
+              longitude: longitud
+            });
+
+            const ubicacionEmpresa = empresa?.get("ubicacion");
+
+            if (ubicacionEmpresa instanceof Parse.GeoPoint) {
+              const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
+              const distanciaMetros = distanciaKm * 1000;
+
+              console.log(
+                `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
+              );
+
+              if (distanciaMetros > 40) {
+                await sock.sendMessage(msg.key.remoteJid, {
+                  text:
+                    "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
+                    "Para fichar debes estar en la oficina 🔫😉"
+                });
+                return;
+              }
+            } else {
+              console.log(
+                "⚠️ La empresa no tiene 'ubicacion' GeoPoint configurada. Se admite fichaje igualmente."
+              );
+            }
+
+            const telefonoBD = empleado.get("telefono");
+            const numeroParaRegistro = telefonoBD
+              ? normalizarNumero(telefonoBD)
+              : numero;
+
+            await guardarFichajeEnBack4app({
+              nombre,
+              dni,
+              numero: numeroParaRegistro,
+              empresa,
+              accion,
+              latitud,
+              longitud
+            });
+
+            await sock.sendMessage(msg.key.remoteJid, {
+              text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
+            });
+
+            return;
+          }
+
+          // Si ya ha escrito ENTRADA/SALIDA y ahora manda texto, se le sigue pidiendo ubicación.
+          // Esto evita que a un trabajador se le envíe el mensaje de "no atención al cliente"
+          // mientras está intentando completar el fichaje.
+          if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
+            await sock.sendMessage(msg.key.remoteJid, {
+              text:
+                "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
+            });
+            return;
+          }
+
+          // ===============================
+          //   ENTRADA / SALIDA
+          // ===============================
+          if (texto === "ENTRADA" || texto === "SALIDA") {
+            const accion = texto;
+
+            const empleado = await buscarEmpleadoPorNumero(numero);
+
+            if (!empleado) {
               await sock.sendMessage(msg.key.remoteJid, {
                 text:
-                  "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
-                  "Para fichar debes estar en la oficina 🔫😉"
+                  "❌ No te encuentro en la base de datos.\n" +
+                  "Este número se utiliza únicamente para el sistema de fichaje de trabajadores.\n\n" +
+                  "Para atención al cliente, puedes llamarnos o ver las distintas formas de contacto en:\n" +
+                  "https://laprimera.net/"
               });
               return;
             }
-          } else {
-            console.log(
-              "⚠️ La empresa no tiene 'ubicacion' (GeoPoint) configurada. Se admite fichaje igualmente."
-            );
-          }
 
-          const telefonoBD = empleado.get("telefono");
-          const numeroParaRegistro = telefonoBD
-            ? normalizarNumero(telefonoBD)
-            : numero;
+            if (
+              empleado.get("activo") === false ||
+              empleado.get("exentoFichaje") === true
+            ) {
+              await sock.sendMessage(msg.key.remoteJid, {
+                text:
+                  "⚠️ Tu usuario no está habilitado para fichar.\n" +
+                  "Si crees que es un error, contacta con administración."
+              });
+              return;
+            }
 
-          await guardarFichajeEnBack4app({
-            nombre,
-            dni,
-            numero: numeroParaRegistro,
-            empresa,
-            accion,
-            latitud,
-            longitud
-          });
+            const nombre = empleado.get("nombre") || "-";
 
-          await sock.sendMessage(msg.key.remoteJid, {
-            text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
-          });
+            esperandoUbicacion.set(numero, { accion, empleado });
 
-          return;
-        }
-
-        if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
-          await sock.sendMessage(msg.key.remoteJid, {
-            text:
-              "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
-          });
-          return;
-        }
-
-        if (texto === "ENTRADA" || texto === "SALIDA") {
-          const accion = texto;
-
-          const empleado = await buscarEmpleadoPorNumero(numero);
-
-          if (!empleado) {
             await sock.sendMessage(msg.key.remoteJid, {
               text:
-                "❌ No te encuentro en la base de datos.\n" +
-                "Por favor, contacta con administración."
+                `Hola, ${nombre}.\n` +
+                `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL usando el icono del clip 📎 → Ubicación.`
             });
+
             return;
           }
 
-          // BLOQUEO PARA JEFE O EMPLEADOS INACTIVOS
-          if (empleado.get("activo") === false || empleado.get("exentoFichaje") === true) {
-            await sock.sendMessage(msg.key.remoteJid, {
-              text:
-                "⚠️ Tu usuario no está habilitado para fichar.\n" +
-                "Si crees que es un error, contacta con administración."
-            });
-            return;
-          }
-
-          const nombre = empleado.get("nombre") || "-";
-
-          esperandoUbicacion.set(numero, { accion, empleado });
-
+          // ===============================
+          //   CUALQUIER OTRO MENSAJE
+          // ===============================
           await sock.sendMessage(msg.key.remoteJid, {
-            text:
-              `Hola, ${nombre}.\n` +
-              `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL usando el icono del clip 📎 → Ubicación.`
+            text: mensajeNoAtencionCliente
           });
 
           return;
         }
-
-        if (!esperandoUbicacion.has(numero)) {
-          await sock.sendMessage(msg.key.remoteJid, {
-            text: "Hola 👋. Escribe *ENTRADA* o *SALIDA* para fichar."
-          });
-          return;
-        }
-
-        if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
-          await sock.sendMessage(msg.key.remoteJid, {
-            text: "⚠️ Aún estoy esperando tu ubicación para completar el fichaje."
-          });
-          return;
-        }
-
-        await sock.sendMessage(msg.key.remoteJid, {
-          text: "Envía *ENTRADA* o *SALIDA* para fichar."
-        });
       } catch (error) {
         console.error("❌ Error procesando mensaje:", error);
       }
