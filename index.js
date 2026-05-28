@@ -333,7 +333,7 @@ async function enviarRecordatorioFichaje(accion) {
 
       const texto =
         accion === "ENTRADA"
-          ? `Buenos días, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *ENTRADA* de hoy.\n\nPara fichar, responde con la palabra *ENTRADA*.`
+          ? `Buenos días, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *ENTRADA* de hoy cabeza chorlo.\n\nPara fichar, responde con la palabra *ENTRADA*.`
           : `Hola, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *SALIDA* de hoy.\n\nPara fichar, responde con la palabra *SALIDA*.`;
 
       await sockWA.sendMessage(jid, { text: texto });
