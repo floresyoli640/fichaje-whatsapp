@@ -121,6 +121,63 @@ function normalizarNumero(num) {
 }
 
 // ===============================
+//   HELPERS PARA MENSAJES WHATSAPP
+// ===============================
+function obtenerMensajeReal(message) {
+  if (!message) return null;
+
+  if (message.ephemeralMessage?.message) {
+    return obtenerMensajeReal(message.ephemeralMessage.message);
+  }
+
+  if (message.viewOnceMessage?.message) {
+    return obtenerMensajeReal(message.viewOnceMessage.message);
+  }
+
+  if (message.viewOnceMessageV2?.message) {
+    return obtenerMensajeReal(message.viewOnceMessageV2.message);
+  }
+
+  if (message.documentWithCaptionMessage?.message) {
+    return obtenerMensajeReal(message.documentWithCaptionMessage.message);
+  }
+
+  return message;
+}
+
+function obtenerTexto(msg) {
+  const message = obtenerMensajeReal(msg.message);
+
+  if (message?.conversation) return message.conversation;
+  if (message?.extendedTextMessage) return message.extendedTextMessage.text || "";
+  if (message?.imageMessage?.caption) return message.imageMessage.caption;
+
+  return "";
+}
+
+function obtenerUbicacion(msg) {
+  const message = obtenerMensajeReal(msg.message);
+
+  if (message?.locationMessage) {
+    return {
+      latitud: message.locationMessage.degreesLatitude,
+      longitud: message.locationMessage.degreesLongitude,
+      tipo: "ubicacion_actual"
+    };
+  }
+
+  if (message?.liveLocationMessage) {
+    return {
+      latitud: message.liveLocationMessage.degreesLatitude,
+      longitud: message.liveLocationMessage.degreesLongitude,
+      tipo: "ubicacion_tiempo_real"
+    };
+  }
+
+  return null;
+}
+
+// ===============================
 //   BASE DE DATOS
 // ===============================
 async function buscarEmpleadoPorNumero(numeroRaw) {
@@ -129,44 +186,100 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   const numLimpio = normalizarNumero(numeroRaw || "");
   const ultimos9 = numLimpio.slice(-9);
 
-  console.log(
-    "🔎 Buscando empleado.",
-    "numeroRaw =", numeroRaw,
-    "numLimpio =", numLimpio,
-    "ultimos9 =", ultimos9
-  );
+  console.log("======================================");
+  console.log("🔎 BUSCANDO EMPLEADO");
+  console.log("numeroRaw:", numeroRaw);
+  console.log("numLimpio:", numLimpio);
+  console.log("ultimos9:", ultimos9);
+  console.log("======================================");
 
-  const esTelefonoEspanol =
-    numLimpio.startsWith("34") && numLimpio.length >= 11 && numLimpio.length <= 13;
+  const queries = [];
 
-  const query = new Parse.Query(Employees);
+  if (numLimpio) {
+    const q1 = new Parse.Query(Employees);
+    q1.equalTo("waId", numLimpio);
+    queries.push(q1);
 
-  if (esTelefonoEspanol) {
-    query.contains("telefono", ultimos9);
-  } else {
-    query.equalTo("waId", numLimpio);
+    const q2 = new Parse.Query(Employees);
+    q2.equalTo("telefono", numLimpio);
+    queries.push(q2);
+
+    const q3 = new Parse.Query(Employees);
+    q3.contains("waId", numLimpio);
+    queries.push(q3);
+
+    const q4 = new Parse.Query(Employees);
+    q4.contains("telefono", numLimpio);
+    queries.push(q4);
   }
 
-  query.include("empresa");
+  if (ultimos9 && ultimos9.length === 9) {
+    const q5 = new Parse.Query(Employees);
+    q5.contains("telefono", ultimos9);
+    queries.push(q5);
 
-  const empleado = await query.first();
+    const q6 = new Parse.Query(Employees);
+    q6.contains("waId", ultimos9);
+    queries.push(q6);
+
+    const q7 = new Parse.Query(Employees);
+    q7.equalTo("telefono", ultimos9);
+    queries.push(q7);
+
+    const q8 = new Parse.Query(Employees);
+    q8.equalTo("waId", ultimos9);
+    queries.push(q8);
+
+    const q9 = new Parse.Query(Employees);
+    q9.equalTo("telefono", "34" + ultimos9);
+    queries.push(q9);
+
+    const q10 = new Parse.Query(Employees);
+    q10.equalTo("waId", "34" + ultimos9);
+    queries.push(q10);
+
+    const q11 = new Parse.Query(Employees);
+    q11.contains("telefono", "34" + ultimos9);
+    queries.push(q11);
+
+    const q12 = new Parse.Query(Employees);
+    q12.contains("waId", "34" + ultimos9);
+    queries.push(q12);
+  }
+
+  if (queries.length === 0) {
+    console.log("❌ No hay número válido para buscar empleado.");
+    return null;
+  }
+
+  const query = Parse.Query.or(...queries);
+  query.include("empresa");
+  query.limit(10);
+
+  const resultados = await query.find();
+
+  console.log("📌 Resultados encontrados:", resultados.length);
+
+  resultados.forEach((emp, index) => {
+    console.log(
+      `#${index + 1}`,
+      "| objectId:", emp.id,
+      "| nombre:", emp.get("nombre"),
+      "| telefono:", emp.get("telefono"),
+      "| waId:", emp.get("waId"),
+      "| activo:", emp.get("activo"),
+      "| exentoFichaje:", emp.get("exentoFichaje")
+    );
+  });
+
+  const empleado = resultados[0] || null;
 
   if (!empleado) {
-    console.log("❌ Ningún empleado encontrado para", numLimpio);
-  } else {
-    console.log(
-      "✅ Empleado encontrado:",
-      empleado.get("nombre"),
-      "| teléfono BD =",
-      empleado.get("telefono"),
-      "| waId BD =",
-      empleado.get("waId"),
-      "| activo =",
-      empleado.get("activo"),
-      "| exentoFichaje =",
-      empleado.get("exentoFichaje")
-    );
+    console.log("❌ Ningún empleado encontrado para:", numLimpio);
+    return null;
   }
+
+  console.log("✅ EMPLEADO SELECCIONADO:", empleado.get("nombre"));
 
   return empleado;
 }
@@ -193,7 +306,7 @@ async function guardarFichajeEnBack4app({
     entry.set("empresa", empresa);
   }
 
-  if (latitud && longitud) {
+  if (Number.isFinite(latitud) && Number.isFinite(longitud)) {
     entry.set(
       "ubicacion",
       new Parse.GeoPoint({
@@ -209,19 +322,6 @@ async function guardarFichajeEnBack4app({
   } catch (e) {
     console.error("❌ Error guardando fichaje:", e);
   }
-}
-
-// ===============================
-//   OBTENER TEXTO DEL MENSAJE
-// ===============================
-function obtenerTexto(msg) {
-  const message = msg.message;
-
-  if (message?.conversation) return message.conversation;
-  if (message?.extendedTextMessage) return message.extendedTextMessage.text || "";
-  if (message?.imageMessage?.caption) return message.imageMessage.caption;
-
-  return "";
 }
 
 // ===============================
@@ -254,7 +354,14 @@ function obtenerNumeroWhatsAppEmpleado(empleado) {
   const telefono = normalizarNumero(empleado.get("telefono"));
   const waId = normalizarNumero(empleado.get("waId"));
 
-  let numero = telefono || waId;
+  // Para enviar recordatorios, es mejor usar teléfono real.
+  // El waId tipo @lid puede servir para reconocer mensajes entrantes,
+  // pero no siempre sirve para enviar mensajes como @s.whatsapp.net.
+  let numero = telefono;
+
+  if (!numero && waId) {
+    numero = waId;
+  }
 
   if (!numero) return null;
 
@@ -333,7 +440,7 @@ async function enviarRecordatorioFichaje(accion) {
 
       const texto =
         accion === "ENTRADA"
-          ? `Buenos días, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *ENTRADA* de hoy cabeza chorlo.\n\nPara fichar, responde con la palabra *ENTRADA*.`
+          ? `Buenos días, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *ENTRADA* de hoy.\n\nPara fichar, responde con la palabra *ENTRADA*.`
           : `Hola, ${nombre} 👋\n\nTe recuerdo que todavía no has registrado tu *SALIDA* de hoy.\n\nPara fichar, responde con la palabra *SALIDA*.`;
 
       await sockWA.sendMessage(jid, { text: texto });
@@ -503,7 +610,8 @@ async function iniciarBot() {
           if (!msg?.message || msg.key?.fromMe) continue;
 
           const rawJid = msg.key.remoteJid || "";
-          const messageId = `${rawJid}:${msg.key.id}`;
+          const rawParticipant = msg.key.participant || "";
+          const messageId = `${rawJid}:${rawParticipant}:${msg.key.id}`;
 
           if (mensajesProcesados.has(messageId)) {
             console.log("⚠️ Mensaje duplicado ignorado:", messageId);
@@ -516,8 +624,6 @@ async function iniciarBot() {
             mensajesProcesados.delete(messageId);
           }, 5 * 60 * 1000);
 
-          const rawParticipant = msg.key.participant || "";
-
           console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
           const baseId = rawParticipant || rawJid;
@@ -525,14 +631,27 @@ async function iniciarBot() {
 
           console.log("📞 Identificador normalizado:", numero);
 
+          const mensajeReal = obtenerMensajeReal(msg.message);
+          console.log("🧪 Tipo de mensaje recibido:", Object.keys(mensajeReal || {}));
+
           const texto = obtenerTexto(msg).trim().toUpperCase();
+          const ubicacionRecibida = obtenerUbicacion(msg);
 
           console.log(`📩 Mensaje de ${numero}: ${texto}`);
+
+          if (ubicacionRecibida) {
+            console.log(
+              "📍 Ubicación detectada:",
+              ubicacionRecibida.tipo,
+              ubicacionRecibida.latitud,
+              ubicacionRecibida.longitud
+            );
+          }
 
           // ===============================
           //   SI ESTÁ ESPERANDO UBICACIÓN
           // ===============================
-          if (esperandoUbicacion.has(numero) && msg.message.locationMessage) {
+          if (esperandoUbicacion.has(numero) && ubicacionRecibida) {
             const { accion, empleado } = esperandoUbicacion.get(numero);
             esperandoUbicacion.delete(numero);
 
@@ -540,8 +659,17 @@ async function iniciarBot() {
             const dni = empleado.get("dni") || "-";
             const empresa = empleado.get("empresa");
 
-            const latitud = msg.message.locationMessage.degreesLatitude;
-            const longitud = msg.message.locationMessage.degreesLongitude;
+            const latitud = ubicacionRecibida.latitud;
+            const longitud = ubicacionRecibida.longitud;
+
+            if (!Number.isFinite(latitud) || !Number.isFinite(longitud)) {
+              await sock.sendMessage(msg.key.remoteJid, {
+                text:
+                  "⚠️ No he podido leer correctamente tu ubicación.\n\n" +
+                  "Por favor envíala de nuevo desde el clip 📎 → Ubicación → Ubicación actual."
+              });
+              return;
+            }
 
             console.log(
               `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
@@ -577,9 +705,13 @@ async function iniciarBot() {
             }
 
             const telefonoBD = empleado.get("telefono");
+            const waIdBD = empleado.get("waId");
+
             const numeroParaRegistro = telefonoBD
               ? normalizarNumero(telefonoBD)
-              : numero;
+              : waIdBD
+                ? normalizarNumero(waIdBD)
+                : numero;
 
             await guardarFichajeEnBack4app({
               nombre,
@@ -601,10 +733,12 @@ async function iniciarBot() {
           // Si ya ha escrito ENTRADA/SALIDA y ahora manda texto, se le sigue pidiendo ubicación.
           // Esto evita que a un trabajador se le envíe el mensaje de "no atención al cliente"
           // mientras está intentando completar el fichaje.
-          if (esperandoUbicacion.has(numero) && !msg.message.locationMessage) {
+          if (esperandoUbicacion.has(numero) && !ubicacionRecibida) {
             await sock.sendMessage(msg.key.remoteJid, {
               text:
-                "⚠️ Estaba esperando tu ubicación. Por favor envíala desde el icono del clip 📎 → Ubicación ACTUAL (NO TIEMPO REAL)."
+                "⚠️ Estaba esperando tu ubicación.\n\n" +
+                "Por favor envíala desde el clip 📎 o botón + → Ubicación → Ubicación actual.\n\n" +
+                "No envíes ubicación en tiempo real."
             });
             return;
           }
@@ -614,6 +748,8 @@ async function iniciarBot() {
           // ===============================
           if (texto === "ENTRADA" || texto === "SALIDA") {
             const accion = texto;
+
+            console.log("🧪 Voy a buscar empleado con número:", numero);
 
             const empleado = await buscarEmpleadoPorNumero(numero);
 
@@ -646,8 +782,10 @@ async function iniciarBot() {
 
             await sock.sendMessage(msg.key.remoteJid, {
               text:
-                `Hola, ${nombre}.\n` +
-                `Para registrar tu *${accion}*, envíame ahora tu ubicación ACTUAL usando el icono del clip 📎 → Ubicación.`
+                `Hola, ${nombre}.\n\n` +
+                `Para registrar tu *${accion}*, envíame ahora tu ubicación actual.\n\n` +
+                `En iPhone: pulsa el botón + o el clip 📎 → Ubicación → *Enviar ubicación actual*.\n\n` +
+                `No envíes ubicación en tiempo real.`
             });
 
             return;
