@@ -354,9 +354,6 @@ function obtenerNumeroWhatsAppEmpleado(empleado) {
   const telefono = normalizarNumero(empleado.get("telefono"));
   const waId = normalizarNumero(empleado.get("waId"));
 
-  // Para enviar recordatorios, es mejor usar teléfono real.
-  // El waId tipo @lid puede servir para reconocer mensajes entrantes,
-  // pero no siempre sirve para enviar mensajes como @s.whatsapp.net.
   let numero = telefono;
 
   if (!numero && waId) {
@@ -516,7 +513,8 @@ async function iniciarBot() {
 
     cerrarSocketAnterior();
 
-    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys_reset3");
+    // RUTA MODIFICADA PARA RAILWAY (Uso de volumen persistente)
+    const { state, saveCreds } = await useMultiFileAuthState("/app/data/auth_sesion_fichaje");
     const { version } = await fetchLatestBaileysVersion();
 
     console.log("🚀 Iniciando Baileys con versión:", version);
@@ -730,9 +728,6 @@ async function iniciarBot() {
             return;
           }
 
-          // Si ya ha escrito ENTRADA/SALIDA y ahora manda texto, se le sigue pidiendo ubicación.
-          // Esto evita que a un trabajador se le envíe el mensaje de "no atención al cliente"
-          // mientras está intentando completar el fichaje.
           if (esperandoUbicacion.has(numero) && !ubicacionRecibida) {
             await sock.sendMessage(msg.key.remoteJid, {
               text:
