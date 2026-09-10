@@ -513,8 +513,8 @@ async function iniciarBot() {
 
     cerrarSocketAnterior();
 
-    // RUTA MODIFICADA PARA RAILWAY (Uso de volumen persistente)
-    const { state, saveCreds } = await useMultiFileAuthState("/app/data/auth_sesion_fichaje");
+    // RUTA MODIFICADA PARA RAILWAY (Volumen persistente + sesión limpia v2)
+    const { state, saveCreds } = await useMultiFileAuthState("/app/data/auth_sesion_fichaje_v2");
     const { version } = await fetchLatestBaileysVersion();
 
     console.log("🚀 Iniciando Baileys con versión:", version);
