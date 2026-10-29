@@ -85,7 +85,7 @@ async function resumen(fecha, empleados, faltas) {
   }));
   return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
 }
-export async function procesarComandoAdmin({ texto, numero, responder }) {
+export async function procesarComandoAdmin({ texto, numero, responder, canalConfirmacion = "whatsapp" }) {
   const comando = texto.trim();
   if (!/^(?:RESUMEN|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
@@ -151,7 +151,8 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
       const registro = await confirmarJornada({
         empleadoId: e.id, fecha, administrador: numero,
         entrada: datos.entrada, salida: datos.salida,
-        fuenteEntrada: datos.fuenteEntrada, fuenteSalida: datos.fuenteSalida
+        fuenteEntrada: datos.fuenteEntrada, fuenteSalida: datos.fuenteSalida,
+        canalConfirmacion
       });
       guardados++;
       if (datos.pendiente) pendientesVerificacion++;
