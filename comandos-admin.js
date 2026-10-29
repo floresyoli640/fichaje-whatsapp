@@ -4,7 +4,10 @@ import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, con
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
 // Configurar FESTIVOS_UBEDA_2026 en Railway tras contrastar el calendario oficial.
 function festivos() {
-  return new Set((process.env.FESTIVOS_UBEDA_2026 || "").split(",").map(x => x.trim()).filter(Boolean));
+  if (!process.env.FESTIVOS_UBEDA_2026?.trim()) {
+    throw new Error("Falta configurar el calendario oficial FESTIVOS_UBEDA_2026");
+  }
+  return new Set(process.env.FESTIVOS_UBEDA_2026.split(",").map(x => x.trim()).filter(Boolean));
 }
 async function empleadosActivos() {
   const q = new Parse.Query("Employees");
