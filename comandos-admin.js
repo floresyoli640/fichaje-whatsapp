@@ -1,5 +1,5 @@
 import Parse from "parse/node.js";
-import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, numeroNormalizado } from "./jornadas-admin.js";
+import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, prepararConfirmacion, numeroNormalizado } from "./jornadas-admin.js";
 
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
 // Configurar FESTIVOS_UBEDA_2026 en Railway tras contrastar el calendario oficial.
