@@ -322,6 +322,7 @@ async function guardarFichajeEnBack4app({
     console.log("✔ Fichaje guardado en TimeEntries (Back4App)");
   } catch (e) {
     console.error("❌ Error guardando fichaje:", e);
+    throw e;
   }
 }
 
@@ -655,7 +656,7 @@ async function iniciarBot() {
           }
 
           // Los comandos administrativos solo se aceptan en chats individuales.
-          if (!rawJid.endsWith("@g.us") && await procesarComandoAdmin({
+          if (rawJid.endsWith("@s.whatsapp.net") && await procesarComandoAdmin({
             texto, numero,
             responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
           })) continue;
