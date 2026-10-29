@@ -51,7 +51,7 @@ function horaLocal(fecha) {
 }
 async function fichajesDelDia(empleado, fecha) {
   const numeros = [empleado.get("telefono"), empleado.get("waId")].filter(Boolean).map(numeroNormalizado);
-  const alternativas = [...new Set(numeros.flatMap(n => [n, n.slice(-9)]))];
+  const alternativas = [...new Set(numeros.flatMap(n => [n, n.slice(-9), n.length === 9 ? `34${n}` : n]))];
   if (!alternativas.length) return {};
   const q = new Parse.Query("TimeEntries");
   q.containedIn("numero", alternativas);
