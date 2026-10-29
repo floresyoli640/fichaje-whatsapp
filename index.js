@@ -654,7 +654,8 @@ async function iniciarBot() {
             );
           }
 
-          if (await procesarComandoAdmin({
+          // Los comandos administrativos solo se aceptan en chats individuales.
+          if (!rawJid.endsWith("@g.us") && await procesarComandoAdmin({
             texto, numero,
             responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
           })) continue;
