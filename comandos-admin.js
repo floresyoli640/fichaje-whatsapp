@@ -49,14 +49,15 @@ async function resumen(fecha, empleados, faltas) {
 }
 export async function procesarComandoAdmin({ texto, numero, responder }) {
   const comando = texto.trim();
-  if (!/^(RESUMEN|AUSENTE\s+|CONFIRMAR TODOS$)/i.test(comando)) return false;
+  if (!/^(?:RESUMEN|AUSENTE\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
     await responder("⛔ Comando reservado a administración.");
     return true;
   }
   try {
     const fecha = fechaLocal();
-    if (!esLaborable(fecha, festivos())) {
+    const calendario = festivos();
+    if (!esLaborable(fecha, calendario)) {
       await responder("Hoy no figura como día laborable. Comprueba que FESTIVOS_UBEDA_2026 contiene todos los festivos oficiales.");
       return true;
     }
