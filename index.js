@@ -615,13 +615,15 @@ async function iniciarBot() {
       }
     });
 
-    sock.ev.on("messages.upsert", async ({ messages }) => {
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type && type !== "notify") return; // No responder al historial sincronizado.
       try {
         for (const msg of messages) {
           if (!msg?.message || msg.key?.fromMe) continue;
 
           const rawJid = msg.key.remoteJid || "";
           const rawParticipant = msg.key.participant || "";
+          if (!rawJid.endsWith("@s.whatsapp.net") && !rawJid.endsWith("@lid")) continue;
           const messageId = `${rawJid}:${rawParticipant}:${msg.key.id}`;
 
           if (mensajesProcesados.has(messageId)) {
@@ -637,30 +639,36 @@ async function iniciarBot() {
 
           console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
-          const baseId = rawParticipant || rawJid;
-          const numero = normalizarNumero(baseId.split("@")[0]);
-
-          console.log("📞 Identificador normalizado:", numero);
-
           const mensajeReal = obtenerMensajeReal(msg.message);
-          console.log("🧪 Tipo de mensaje recibido:", Object.keys(mensajeReal || {}));
-
           const texto = obtenerTexto(msg).trim().toUpperCase();
           const ubicacionRecibida = obtenerUbicacion(msg);
+          // Ignorar mensajes de protocolo, sincronización y otros eventos sin contenido del usuario.
+          if (!texto && !ubicacionRecibida) continue;
 
-          console.log(`📩 Mensaje de ${numero}: ${texto}`);
+          // WhatsApp puede entregar chats particulares usando LID en vez del teléfono.
+          // Solo asociar el mensaje a un empleado/admin cuando hay un número verificable.
+          let jidTelefono = rawJid;
+          if (rawJid.endsWith("@lid")) {
+            jidTelefono = msg.key.remoteJidAlt?.endsWith("@s.whatsapp.net")
+              ? msg.key.remoteJidAlt
+              : await sock.signalRepository?.lidMapping?.getPNForLID?.(rawJid);
+          }
+          if (!jidTelefono?.endsWith("@s.whatsapp.net")) {
+            console.warn("⚠️ Mensaje desde LID sin correspondencia de teléfono: no se registra ningún fichaje.");
+            await sock.sendMessage(rawJid, {
+              text: "⚠️ No puedo verificar tu número de WhatsApp para fichar. Contacta con administración."
+            });
+            continue;
+          }
+          const numero = normalizarNumero(jidTelefono.split("@")[0]);
 
+          console.log("📩 Mensaje recibido:", texto || "[ubicación]");
           if (ubicacionRecibida) {
-            console.log(
-              "📍 Ubicación detectada:",
-              ubicacionRecibida.tipo,
-              ubicacionRecibida.latitud,
-              ubicacionRecibida.longitud
-            );
+            console.log("📍 Tipo de ubicación:", ubicacionRecibida.tipo);
           }
 
           // Los comandos administrativos solo se aceptan en chats individuales.
-          if (rawJid.endsWith("@s.whatsapp.net") && await procesarComandoAdmin({
+          if (await procesarComandoAdmin({
             texto, numero,
             responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
           })) continue;
