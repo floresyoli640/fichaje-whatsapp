@@ -22,6 +22,7 @@ import makeWASocket, {
 
 import QRCode from "qrcode";
 import cron from "node-cron";
+import { procesarComandoAdmin, enviarResumenDiario } from "./comandos-admin.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -477,7 +478,14 @@ function iniciarRecordatorios() {
     }
   );
 
-  console.log("⏰ Recordatorios programados: 08:05 ENTRADA y 15:05 SALIDA.");
+  cron.schedule("5 15 * * 1-5", async () => {
+    if (sockWA && estadoWA === "conectado") {
+      try { await enviarResumenDiario(sockWA); }
+      catch (e) { console.error("Error enviando resumen administrativo:", e); }
+    }
+  }, { timezone: "Europe/Madrid" });
+
+  console.log("⏰ Recordatorios y resumen administrativo programados.");
 }
 
 // ===============================
@@ -645,6 +653,11 @@ async function iniciarBot() {
               ubicacionRecibida.longitud
             );
           }
+
+          if (await procesarComandoAdmin({
+            texto, numero,
+            responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
+          })) continue;
 
           // ===============================
           //   SI ESTÁ ESPERANDO UBICACIÓN
