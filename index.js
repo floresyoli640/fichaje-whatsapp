@@ -24,6 +24,7 @@ import QRCode from "qrcode";
 import cron from "node-cron";
 import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } from "./comandos-admin.js";
 import { construirMapaLIDs } from "./identidad-whatsapp.js";
+import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 
 // ===============================
@@ -897,4 +898,17 @@ cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
   timezone: "Europe/Madrid"
 });
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
+
+// Una ejecución controlada solicitada explícitamente por administración para la fecha indicada.
+// No convierte horarios previstos en fichajes GPS; solo crea confirmaciones auditadas.
+if (process.env.CONFIRMACION_ADMIN_UNICA_FECHA === fechaLocal() && process.env.ADMIN_WHATSAPP) {
+  void procesarComandoAdmin({
+    texto: "CONFIRMAR TODOS",
+    numero: process.env.ADMIN_WHATSAPP,
+    canalConfirmacion: "solicitud_explicita_administracion",
+    responder: async resultado => {
+      console.log("📋 Confirmación administrativa solicitada para el día:", resultado);
+    }
+  }).catch(error => console.error("❌ Confirmación administrativa de arranque:", error));
+}
 iniciarBot();
