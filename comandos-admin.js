@@ -11,6 +11,9 @@ function festivos(fecha = fechaLocal()) {
   if (fechas.some(x => !/^\d{4}-\d{2}-\d{2}$/.test(x))) throw new Error("Formato inválido en " + clave);
   return new Set(fechas);
 }
+export function esDiaLaborableConfigurado(fecha = fechaLocal()) {
+  return esLaborable(fecha, festivos(fecha));
+}
 async function empleadosActivos() {
   const q = new Parse.Query("Employees");
   q.equalTo("activo", true);
@@ -84,7 +87,7 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
     const fecha = fechaLocal();
     const calendario = festivos(fecha);
     if (!esLaborable(fecha, calendario)) {
-      await responder("Hoy no figura como día laborable. Comprueba que FESTIVOS_UBEDA_2026 contiene todos los festivos oficiales.");
+      await responder("Hoy no figura como día laborable. Comprueba el calendario de festivos configurado para este año.");
       return true;
     }
     const empleados = await empleadosActivos();
