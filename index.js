@@ -667,7 +667,6 @@ async function iniciarBot() {
           // ===============================
           if (esperandoUbicacion.has(numero) && ubicacionRecibida) {
             const { accion, empleado } = esperandoUbicacion.get(numero);
-            esperandoUbicacion.delete(numero);
 
             const nombre = empleado.get("nombre") || "-";
             const dni = empleado.get("dni") || "-";
@@ -682,7 +681,7 @@ async function iniciarBot() {
                   "⚠️ No he podido leer correctamente tu ubicación.\n\n" +
                   "Por favor envíala de nuevo desde el clip 📎 → Ubicación → Ubicación actual."
               });
-              return;
+              continue;
             }
 
             console.log(
@@ -710,7 +709,7 @@ async function iniciarBot() {
                     "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
                     "Para fichar debes estar en la oficina 🔫😉"
                 });
-                return;
+                continue;
               }
             } else {
               console.log(
@@ -737,11 +736,13 @@ async function iniciarBot() {
               longitud
             });
 
+            esperandoUbicacion.delete(numero);
+
             await sock.sendMessage(msg.key.remoteJid, {
               text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
             });
 
-            return;
+            continue;
           }
 
           if (esperandoUbicacion.has(numero) && !ubicacionRecibida) {
@@ -751,7 +752,7 @@ async function iniciarBot() {
                 "Por favor envíala desde el clip 📎 o botón + → Ubicación → Ubicación actual.\n\n" +
                 "No envíes ubicación en tiempo real."
             });
-            return;
+            continue;
           }
 
           // ===============================
@@ -772,7 +773,7 @@ async function iniciarBot() {
                   "Para atención al cliente, puedes llamarnos o ver las distintas formas de contacto en:\n" +
                   "https://laprimera.net/"
               });
-              return;
+              continue;
             }
 
             if (
@@ -784,7 +785,7 @@ async function iniciarBot() {
                   "⚠️ Tu usuario no está habilitado para fichar.\n" +
                   "Si crees que es un error, contacta con administración."
               });
-              return;
+              continue;
             }
 
             const nombre = empleado.get("nombre") || "-";
@@ -799,7 +800,7 @@ async function iniciarBot() {
                 `No envíes ubicación en tiempo real.`
             });
 
-            return;
+            continue;
           }
 
           // ===============================
@@ -809,7 +810,7 @@ async function iniciarBot() {
             text: mensajeNoAtencionCliente
           });
 
-          return;
+          continue;
         }
       } catch (error) {
         console.error("❌ Error procesando mensaje:", error);
