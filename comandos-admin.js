@@ -1,4 +1,5 @@
 import Parse from "parse/node.js";
+import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, prepararConfirmacion, numeroNormalizado } from "./jornadas-admin.js";
 
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
@@ -83,11 +84,11 @@ async function resumen(fecha, empleados, faltas) {
       : " | ✅ confirmada por administración (fichajes/corrección)";
     return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}${estado}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: VERIFICAR BD | AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder, canalConfirmacion = "whatsapp" }) {
   const comando = texto.trim();
-  if (!/^(?:RESUMEN|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
+  if (!/^(?:RESUMEN|VERIFICAR BD|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
     await responder("⛔ Comando reservado a administración.");
     return true;
@@ -97,6 +98,17 @@ export async function procesarComandoAdmin({ texto, numero, responder, canalConf
     const calendario = festivos(fecha);
     if (!esLaborable(fecha, calendario)) {
       await responder("Hoy no figura como día laborable. Comprueba el calendario de festivos configurado para este año.");
+      return true;
+    }
+    if (/^VERIFICAR BD$/i.test(comando)) {
+      const estado = await comprobarRegistrosBack4App(fecha);
+      await responder(
+        `🔎 *Back4App ${fecha}*\n` +
+        `Jornadas previstas: ${estado.tablas.JornadasPrevistas}\n` +
+        `Confirmaciones administrativas: ${estado.tablas.ConfirmacionesJornada} (${estado.empleadosConConfirmacion} empleados distintos)\n` +
+        `Fichajes reales: ${estado.fichajesReales.entradas} entradas y ${estado.fichajesReales.salidas} salidas\n` +
+        `Tabla de confirmaciones: *ConfirmacionesJornada*. Los horarios previstos no son marcas GPS.`
+      );
       return true;
     }
     const empleados = await empleadosActivos();
@@ -159,7 +171,7 @@ export async function procesarComandoAdmin({ texto, numero, responder, canalConf
       else conEvidencia++;
       if (!registro.creada && !registro.actualizada) yaGuardadas++;
     }
-    await responder(`✅ ${guardados} jornadas registradas por administración: ${conEvidencia} con evidencia completa y ${pendientesVerificacion} con horas previstas pendientes de verificar. ${faltas.length} ausencias; ${yaGuardadas} ya guardadas. Las horas sin fichaje son referencias del horario 08:00–15:00, NO fichajes GPS. Envía RESUMEN para verlas.`);
+    await responder(`✅ ${guardados} jornadas registradas por administración: ${conEvidencia} con evidencia completa y ${pendientesVerificacion} con horas previstas pendientes de verificar. ${faltas.length} ausencias; ${yaGuardadas} ya guardadas. Las horas sin fichaje son referencias del horario 08:00–15:00, NO fichajes GPS. Consulta las confirmaciones en Back4App → ConfirmacionesJornada; envía VERIFICAR BD para comprobar el total.`);
     return true;
   } catch (error) {
     await responder(`⚠️ No se completó la operación: ${error.message}`);
