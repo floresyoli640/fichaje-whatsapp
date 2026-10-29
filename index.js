@@ -22,7 +22,7 @@ import makeWASocket, {
 
 import QRCode from "qrcode";
 import cron from "node-cron";
-import { procesarComandoAdmin, enviarResumenDiario } from "./comandos-admin.js";
+import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } from "./comandos-admin.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -415,6 +415,7 @@ async function enviarRecordatorioFichaje(accion) {
       return;
     }
 
+    if (!esDiaLaborableConfigurado()) return;
     console.log(`⏰ Revisando recordatorios de ${accion}...`);
 
     const empleados = await obtenerEmpleadosActivos();
