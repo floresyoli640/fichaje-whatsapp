@@ -74,7 +74,7 @@ async function resumen(fecha, empleados, faltas) {
     const marcas = await fichajesDelDia(empleado, fecha);
     return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida únicamente jornadas con ENTRADA y SALIDA registradas; las incompletas quedan pendientes.`;
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida jornadas con fichajes completos o correcciones documentadas; las demás quedan pendientes.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder }) {
   const comando = texto.trim();
@@ -148,7 +148,7 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
       });
       guardados++;
     }
-    await responder(`✅ ${guardados} jornadas verificadas con marcas existentes. ${faltas.length} ausencias. ${pendientes.length} pendientes: ${pendientes.join(", ") || "ninguna"}. No se han creado fichajes en TimeEntries.`);
+    await responder(`✅ ${guardados} jornadas confirmadas con fichajes o correcciones documentadas. ${faltas.length} ausencias. ${pendientes.length} pendientes: ${pendientes.join(", ") || "ninguna"}. No se han creado fichajes en TimeEntries.`);
     return true;
   } catch (error) {
     await responder(`⚠️ No se completó la operación: ${error.message}`);
