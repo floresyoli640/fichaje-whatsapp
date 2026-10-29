@@ -24,6 +24,7 @@ import QRCode from "qrcode";
 import cron from "node-cron";
 import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } from "./comandos-admin.js";
 import { construirMapaLIDs } from "./identidad-whatsapp.js";
+import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -877,4 +878,23 @@ async function iniciarBot() {
   }
 }
 
+let generandoPlanificacion = false;
+async function asegurarPlanificacionDiaria() {
+  if (generandoPlanificacion) return;
+  generandoPlanificacion = true;
+  try {
+    await registrarJornadasPrevistas();
+  } catch (error) {
+    console.error("❌ Fallo al registrar jornadas previstas:", error?.message || error);
+  } finally {
+    generandoPlanificacion = false;
+  }
+}
+
+// Se ejecuta aun sin WhatsApp vinculado: registrar turnos no depende de los mensajes.
+// Reintentos idempotentes durante la mañana por si Back4App está indisponible a las 08:00.
+cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
+  timezone: "Europe/Madrid"
+});
+void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
 iniciarBot();
