@@ -1,5 +1,5 @@
 import Parse from "parse/node.js";
-import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, HORARIO, numeroNormalizado } from "./jornadas-admin.js";
+import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, numeroNormalizado } from "./jornadas-admin.js";
 
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
 // Configurar FESTIVOS_UBEDA_2026 en Railway tras contrastar el calendario oficial.
@@ -41,11 +41,35 @@ async function marcarAusencia(fecha, empleado, administrador) {
   obj.set("registradoEn", new Date());
   await obj.save();
 }
+function horaLocal(fecha) {
+  return new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(fecha);
+}
+async function fichajesDelDia(empleado, fecha) {
+  const numeros = [empleado.get("telefono"), empleado.get("waId")].filter(Boolean).map(numeroNormalizado);
+  const alternativas = [...new Set(numeros.flatMap(n => [n, n.slice(-9)]))];
+  if (!alternativas.length) return {};
+  const q = new Parse.Query("TimeEntries");
+  q.containedIn("numero", alternativas);
+  const d = new Date(fecha + "T00:00:00Z");
+  q.greaterThanOrEqualTo("fecha", new Date(d.getTime() - 86400000));
+  q.lessThan("fecha", new Date(d.getTime() + 172800000));
+  q.ascending("fecha");
+  q.limit(1000);
+  const marcas = (await q.find()).filter(x => x.get("fecha") instanceof Date && fechaLocal(x.get("fecha")) === fecha);
+  const entrada = marcas.find(x => x.get("accion") === "ENTRADA");
+  const salida = [...marcas].reverse().find(x => x.get("accion") === "SALIDA");
+  return { entrada: entrada?.get("fecha"), salida: salida?.get("fecha") };
+}
 async function resumen(fecha, empleados, faltas) {
   const ids = new Set(faltas.map(a => a.get("empleadoId")));
   const previstos = await obtenerJornadasPrevistas(fecha, empleados, festivos());
-  const lineas = previstos.map(p => `• ${p.nombre}: ${ids.has(p.empleadoId) ? "AUSENTE" : "Pendiente de confirmar"}`);
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS declara que has verificado la asistencia y el horario habitual de los presentes. Si hubo cambios de horario, no uses la confirmación en bloque hasta corregirlos.`;
+  const lineas = await Promise.all(previstos.map(async p => {
+    if (ids.has(p.empleadoId)) return `• ${p.nombre}: AUSENTE`;
+    const empleado = empleados.find(e => e.id === p.empleadoId);
+    const marcas = await fichajesDelDia(empleado, fecha);
+    return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}`;
+  }));
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida únicamente jornadas con ENTRADA y SALIDA registradas; las incompletas quedan pendientes.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder }) {
   const comando = texto.trim();
@@ -77,14 +101,20 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
     const presentes = empleados.filter(e => !excluidos.has(e.id));
     // Confirmación administrativa explícita, NO fichajes de dispositivo ni GPS.
     let guardados = 0;
+    const pendientes = [];
     for (const e of presentes) {
+      const marcas = await fichajesDelDia(e, fecha);
+      if (!marcas.entrada || !marcas.salida || marcas.salida <= marcas.entrada) {
+        pendientes.push(e.get("nombre") || e.id);
+        continue;
+      }
       await confirmarJornada({
         empleadoId: e.id, fecha, administrador: numero,
-        entradaReal: HORARIO.entrada, salidaReal: HORARIO.salida
+        entradaReal: horaLocal(marcas.entrada), salidaReal: horaLocal(marcas.salida)
       });
       guardados++;
     }
-    await responder(`✅ ${guardados} jornadas declaradas y confirmadas administrativamente (08:00–15:00). ${faltas.length} ausencias. No se han creado fichajes GPS ni marcas automáticas en TimeEntries.`);
+    await responder(`✅ ${guardados} jornadas verificadas con marcas existentes. ${faltas.length} ausencias. ${pendientes.length} pendientes: ${pendientes.join(", ") || "ninguna"}. No se han creado fichajes en TimeEntries.`);
     return true;
   } catch (error) {
     await responder(`⚠️ No se completó la operación: ${error.message}`);
