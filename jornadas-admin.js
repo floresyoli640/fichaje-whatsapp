@@ -41,25 +41,76 @@ export async function obtenerJornadasPrevistas(fechaISO, empleados, festivos = n
     }));
 }
 
-// Confirmación administrativa explícita: almacena una validación separada de TimeEntries.
-// No afirma que los horarios previstos sean marcas de entrada o salida.
-export async function confirmarJornada({ empleadoId, fecha, administrador, entradaReal, salidaReal }) {
-  if (!empleadoId || !fecha || !administrador || !entradaReal || !salidaReal) {
-    throw new Error("Se requieren empleado, fecha, administrador y horas reales verificadas");
+// Datos de una confirmación: las horas previstas son referencias, NO fichajes reales.
+export function prepararConfirmacion({ marcas = {}, correccion = null, horario = HORARIO }) {
+  const entradaCorregida = correccion?.get("entradaCorregida");
+  const salidaCorregida = correccion?.get("salidaCorregida");
+  const convertirHora = fecha => new Intl.DateTimeFormat("es-ES", {
+    timeZone: ZONA, hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).format(fecha);
+  const entradaReal = marcas.entrada instanceof Date ? convertirHora(marcas.entrada) : null;
+  const salidaReal = marcas.salida instanceof Date ? convertirHora(marcas.salida) : null;
+
+  const entrada = entradaCorregida || entradaReal || horario.entrada;
+  const salida = salidaCorregida || salidaReal || horario.salida;
+  const fuenteEntrada = entradaCorregida ? "correccion_documentada" : entradaReal ? "fichaje_real" : "horario_previsto";
+  const fuenteSalida = salidaCorregida ? "correccion_documentada" : salidaReal ? "fichaje_real" : "horario_previsto";
+  const pendiente = fuenteEntrada === "horario_previsto" || fuenteSalida === "horario_previsto";
+  return {
+    entrada, salida, fuenteEntrada, fuenteSalida,
+    estado: pendiente ? "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION" : "CONFIRMADA_ADMIN_CON_EVIDENCIA",
+    pendiente
+  };
+}
+
+// Guarda la confirmación de administración en una tabla separada de TimeEntries.
+// Repetir el comando no crea registros duplicados ni sobrescribe las marcas GPS.
+export async function confirmarJornada({
+  empleadoId, fecha, administrador, entrada, salida, fuenteEntrada, fuenteSalida,
+  canalConfirmacion = "whatsapp", cliente = Parse
+}) {
+  if (!empleadoId || !fecha || !administrador || !entrada || !salida ||
+      !fuenteEntrada || !fuenteSalida) {
+    throw new Error("Faltan datos para la confirmación administrativa");
   }
-  const Confirmaciones = Parse.Object.extend("ConfirmacionesJornada");
-  const query = new Parse.Query(Confirmaciones);
-  query.equalTo("clave", `${empleadoId}:${fecha}`);
+  const fuentesValidas = new Set(["fichaje_real", "correccion_documentada", "horario_previsto"]);
+  if (!fuentesValidas.has(fuenteEntrada) || !fuentesValidas.has(fuenteSalida)) {
+    throw new Error("Origen de horas no reconocido");
+  }
+  const confirmado = fuenteEntrada !== "horario_previsto" && fuenteSalida !== "horario_previsto";
+  const estado = confirmado ? "CONFIRMADA_ADMIN_CON_EVIDENCIA" : "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION";
+  const Confirmaciones = cliente.Object.extend("ConfirmacionesJornada");
+  const query = new cliente.Query(Confirmaciones);
+  const clave = `${empleadoId}:${fecha}`;
+  query.equalTo("clave", clave);
   let registro = await query.first();
+  const yaExistia = Boolean(registro);
   if (!registro) registro = new Confirmaciones();
-  registro.set("clave", `${empleadoId}:${fecha}`);
-  registro.set("empleadoId", empleadoId);
-  registro.set("fechaLaboral", fecha);
-  registro.set("entradaVerificada", entradaReal);
-  registro.set("salidaVerificada", salidaReal);
-  registro.set("administrador", numeroNormalizado(administrador));
-  registro.set("origen", "confirmacion_administrativa");
-  registro.set("validadoEn", new Date());
+
+  const campos = {
+    clave, empleadoId, fechaLaboral: fecha,
+    entradaReferencia: entrada, salidaReferencia: salida,
+    fuenteEntrada, fuenteSalida, estado,
+    administrador: numeroNormalizado(administrador),
+    origen: "confirmacion_administrativa",
+    canalConfirmacion
+  };
+  const sinCambios = yaExistia && Object.entries(campos).every(([k, v]) => registro.get(k) === v);
+  if (sinCambios) return { id: registro.id, creada: false, actualizada: false, estado };
+
+  for (const [claveCampo, valor] of Object.entries(campos)) registro.set(claveCampo, valor);
+  // Compatibilidad: únicamente usar campos 'Verificada' si existen evidencias o corrección.
+  if (confirmado) {
+    registro.set("entradaVerificada", entrada);
+    registro.set("salidaVerificada", salida);
+    registro.set("validadoEn", new Date());
+  } else {
+    registro.unset("entradaVerificada");
+    registro.unset("salidaVerificada");
+    registro.unset("validadoEn");
+  }
+  if (!yaExistia) registro.set("confirmadoEn", new Date());
+  registro.set("actualizadoEn", new Date());
   await registro.save();
-  return registro.id;
+  return { id: registro.id, creada: !yaExistia, actualizada: yaExistia, estado };
 }
