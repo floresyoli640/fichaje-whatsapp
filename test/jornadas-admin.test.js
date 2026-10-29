@@ -32,3 +32,59 @@ test("Solo planifica empleados activos no exentos", async () => {
 test("Fecha local usa formato ISO", () => {
   assert.match(fechaLocal(new Date("2026-10-29T12:00:00Z")), /^2026-10-29$/);
 });
+
+test("Rechaza festivos locales y traslados oficiales configurados", async () => {
+  const { esDiaLaborableConfigurado } = await import("../comandos-admin.js");
+  const previo = process.env.FESTIVOS_UBEDA_2026;
+  process.env.FESTIVOS_UBEDA_2026 = "2026-09-08,2026-09-29,2026-11-02,2026-12-07";
+  try {
+    for (const fecha of ["2026-09-08", "2026-09-29", "2026-11-02", "2026-12-07"]) {
+      assert.equal(esDiaLaborableConfigurado(fecha), false, fecha);
+    }
+    assert.equal(esDiaLaborableConfigurado("2026-09-30"), true);
+  } finally {
+    if (previo === undefined) delete process.env.FESTIVOS_UBEDA_2026;
+    else process.env.FESTIVOS_UBEDA_2026 = previo;
+  }
+});
+
+test("No permite ejecutar comandos de administración a un número ajeno", async () => {
+  const { procesarComandoAdmin } = await import("../comandos-admin.js");
+  const anterior = process.env.ADMIN_WHATSAPP;
+  process.env.ADMIN_WHATSAPP = "34600000000";
+  const respuestas = [];
+  try {
+    const procesado = await procesarComandoAdmin({
+      texto: "CONFIRMAR TODOS",
+      numero: "34611111111",
+      responder: async texto => respuestas.push(texto)
+    });
+    assert.equal(procesado, true);
+    assert.match(respuestas[0], /reservado a administración/i);
+  } finally {
+    if (anterior === undefined) delete process.env.ADMIN_WHATSAPP;
+    else process.env.ADMIN_WHATSAPP = anterior;
+  }
+});
+
+test("Bloquea comandos si no hay calendario configurado", async () => {
+  const { procesarComandoAdmin } = await import("../comandos-admin.js");
+  const adminPrevio = process.env.ADMIN_WHATSAPP;
+  const festivosPrevio = process.env.FESTIVOS_UBEDA_2026;
+  process.env.ADMIN_WHATSAPP = "34600000000";
+  delete process.env.FESTIVOS_UBEDA_2026;
+  const respuestas = [];
+  try {
+    const procesado = await procesarComandoAdmin({
+      texto: "RESUMEN", numero: "34600000000",
+      responder: async texto => respuestas.push(texto)
+    });
+    assert.equal(procesado, true);
+    assert.match(respuestas[0], /Falta configurar el calendario oficial/);
+  } finally {
+    if (adminPrevio === undefined) delete process.env.ADMIN_WHATSAPP;
+    else process.env.ADMIN_WHATSAPP = adminPrevio;
+    if (festivosPrevio === undefined) delete process.env.FESTIVOS_UBEDA_2026;
+    else process.env.FESTIVOS_UBEDA_2026 = festivosPrevio;
+  }
+});
