@@ -68,13 +68,22 @@ async function fichajesDelDia(empleado, fecha) {
 async function resumen(fecha, empleados, faltas) {
   const ids = new Set(faltas.map(a => a.get("empleadoId")));
   const previstos = await obtenerJornadasPrevistas(fecha, empleados, festivos(fecha));
+  const q = new Parse.Query("ConfirmacionesJornada");
+  q.equalTo("fechaLaboral", fecha);
+  q.limit(1000);
+  const confirmaciones = await q.find();
+  const confirmadas = new Map(confirmaciones.map(r => [r.get("empleadoId"), r]));
   const lineas = await Promise.all(previstos.map(async p => {
     if (ids.has(p.empleadoId)) return `• ${p.nombre}: AUSENTE`;
     const empleado = empleados.find(e => e.id === p.empleadoId);
     const marcas = await fichajesDelDia(empleado, fecha);
-    return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}`;
+    const r = confirmadas.get(p.empleadoId);
+    const estado = !r ? "" : r.get("estado") === "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION"
+      ? " | ✅ registrada por administración (horario previsto, pendiente de verificar)"
+      : " | ✅ confirmada por administración (fichajes/corrección)";
+    return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}${estado}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida jornadas con fichajes completos o correcciones documentadas; las demás quedan pendientes.`;
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder }) {
   const comando = texto.trim();
