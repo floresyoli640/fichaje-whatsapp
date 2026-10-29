@@ -9,7 +9,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.7.21",
+    "@whiskeysockets/baileys": "6.7.22",
     "express": "^4.19.2",
     "node-cron": "^3.0.3",
     "parse": "^7.0.2",
