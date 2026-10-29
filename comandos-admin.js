@@ -3,11 +3,13 @@ import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, con
 
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
 // Configurar FESTIVOS_UBEDA_2026 en Railway tras contrastar el calendario oficial.
-function festivos() {
-  if (!process.env.FESTIVOS_UBEDA_2026?.trim()) {
-    throw new Error("Falta configurar el calendario oficial FESTIVOS_UBEDA_2026");
-  }
-  return new Set(process.env.FESTIVOS_UBEDA_2026.split(",").map(x => x.trim()).filter(Boolean));
+function festivos(fecha = fechaLocal()) {
+  const clave = "FESTIVOS_UBEDA_" + fecha.slice(0, 4);
+  const valor = process.env[clave];
+  if (!valor?.trim()) throw new Error("Falta configurar el calendario oficial " + clave);
+  const fechas = valor.split(",").map(x => x.trim()).filter(Boolean);
+  if (fechas.some(x => !/^\d{4}-\d{2}-\d{2}$/.test(x))) throw new Error("Formato inválido en " + clave);
+  return new Set(fechas);
 }
 async function empleadosActivos() {
   const q = new Parse.Query("Employees");
@@ -62,25 +64,25 @@ async function fichajesDelDia(empleado, fecha) {
 }
 async function resumen(fecha, empleados, faltas) {
   const ids = new Set(faltas.map(a => a.get("empleadoId")));
-  const previstos = await obtenerJornadasPrevistas(fecha, empleados, festivos());
+  const previstos = await obtenerJornadasPrevistas(fecha, empleados, festivos(fecha));
   const lineas = await Promise.all(previstos.map(async p => {
     if (ids.has(p.empleadoId)) return `• ${p.nombre}: AUSENTE`;
     const empleado = empleados.find(e => e.id === p.empleadoId);
     const marcas = await fichajesDelDia(empleado, fecha);
     return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida únicamente jornadas con ENTRADA y SALIDA registradas; las incompletas quedan pendientes.`;
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS valida únicamente jornadas con ENTRADA y SALIDA registradas; las incompletas quedan pendientes.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder }) {
   const comando = texto.trim();
-  if (!/^(?:RESUMEN|AUSENTE\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
+  if (!/^(?:RESUMEN|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
     await responder("⛔ Comando reservado a administración.");
     return true;
   }
   try {
     const fecha = fechaLocal();
-    const calendario = festivos();
+    const calendario = festivos(fecha);
     if (!esLaborable(fecha, calendario)) {
       await responder("Hoy no figura como día laborable. Comprueba que FESTIVOS_UBEDA_2026 contiene todos los festivos oficiales.");
       return true;
@@ -92,6 +94,26 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
       await responder(`Ausencia registrada para ${empleado.get("nombre")} el ${fecha}.`);
       return true;
     }
+    if (/^CORREGIR\s+/i.test(comando)) {
+      const datos = comando.match(/^CORREGIR\s+(.+?)\s+(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(.+)$/i);
+      if (!datos) throw new Error("Formato: CORREGIR Nombre Apellidos HH:MM HH:MM motivo");
+      const [, nombre, entrada, salida, motivo] = datos;
+      if (![entrada, salida].every(h => /^([01]\d|2[0-3]):[0-5]\d$/.test(h)) || salida <= entrada) throw new Error("Horas inválidas o salida anterior a entrada");
+      const empleado = identificarEmpleado(empleados, nombre);
+      const Correcciones = Parse.Object.extend("CorreccionesJornada");
+      const registro = new Correcciones();
+      registro.set("empleadoId", empleado.id);
+      registro.set("nombre", empleado.get("nombre"));
+      registro.set("fechaLaboral", fecha);
+      registro.set("entradaCorregida", entrada);
+      registro.set("salidaCorregida", salida);
+      registro.set("motivo", motivo);
+      registro.set("administrador", numeroNormalizado(numero));
+      registro.set("registradoEn", new Date());
+      await registro.save();
+      await responder(`📝 Corrección registrada para ${empleado.get("nombre")}: ${entrada}–${salida}. Queda en el historial de auditoría; no modifica fichajes GPS.`);
+      return true;
+    }
     const faltas = await ausencias(fecha);
     if (/^RESUMEN$/i.test(comando)) {
       await responder(await resumen(fecha, empleados, faltas));
@@ -99,18 +121,27 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
     }
     const excluidos = new Set(faltas.map(a => a.get("empleadoId")));
     const presentes = empleados.filter(e => !excluidos.has(e.id));
+    const correccionesQuery = new Parse.Query("CorreccionesJornada");
+    correccionesQuery.equalTo("fechaLaboral", fecha);
+    correccionesQuery.descending("registradoEn");
+    correccionesQuery.limit(1000);
+    const correcciones = await correccionesQuery.find();
+    const ultimasCorrecciones = new Map();
+    for (const c of correcciones) if (!ultimasCorrecciones.has(c.get("empleadoId"))) ultimasCorrecciones.set(c.get("empleadoId"), c);
     // Confirmación administrativa explícita, NO fichajes de dispositivo ni GPS.
     let guardados = 0;
     const pendientes = [];
     for (const e of presentes) {
       const marcas = await fichajesDelDia(e, fecha);
-      if (!marcas.entrada || !marcas.salida || marcas.salida <= marcas.entrada) {
+      const correccion = ultimasCorrecciones.get(e.id);
+      if (!correccion && (!marcas.entrada || !marcas.salida || marcas.salida <= marcas.entrada)) {
         pendientes.push(e.get("nombre") || e.id);
         continue;
       }
       await confirmarJornada({
         empleadoId: e.id, fecha, administrador: numero,
-        entradaReal: horaLocal(marcas.entrada), salidaReal: horaLocal(marcas.salida)
+        entradaReal: correccion ? correccion.get("entradaCorregida") : horaLocal(marcas.entrada),
+        salidaReal: correccion ? correccion.get("salidaCorregida") : horaLocal(marcas.salida)
       });
       guardados++;
     }
@@ -124,7 +155,7 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
 export async function enviarResumenDiario(sock) {
   if (!process.env.ADMIN_WHATSAPP) return;
   const fecha = fechaLocal();
-  if (!esLaborable(fecha, festivos())) return;
+  if (!esLaborable(fecha, festivos(fecha))) return;
   const empleados = await empleadosActivos();
   const faltas = await ausencias(fecha);
   const jid = `${numeroNormalizado(process.env.ADMIN_WHATSAPP)}@s.whatsapp.net`;
