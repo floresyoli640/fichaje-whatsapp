@@ -39,6 +39,7 @@ let sockWA = null;
 
 // Evita iniciar los cron varias veces
 let recordatoriosIniciados = false;
+let comprobacionArranqueRealizada = false;
 
 // Estado global de usuarios esperando ubicación
 const esperandoUbicacion = new Map();
@@ -603,6 +604,33 @@ async function iniciarBot() {
         console.log("✅ Conectado a WhatsApp");
 
         iniciarRecordatorios();
+        // Verificación real de lectura de Back4App y prueba de envío al número administrador.
+        // Se ejecuta una única vez por arranque para evitar notificaciones duplicadas.
+        if (!comprobacionArranqueRealizada) {
+          comprobacionArranqueRealizada = true;
+          void (async () => {
+            try {
+              await new Parse.Query("Employees").limit(1).find();
+              await new Parse.Query("TimeEntries").limit(1).find();
+              console.log("✅ Back4App: lectura de Employees y TimeEntries correcta");
+            } catch (error) {
+              console.error("❌ Back4App: fallo en comprobación de lectura:", error?.message || error);
+              return;
+            }
+            if (process.env.ADMIN_WHATSAPP) {
+              try {
+                let numeroAdmin = normalizarNumero(process.env.ADMIN_WHATSAPP);
+                if (numeroAdmin.length === 9) numeroAdmin = "34" + numeroAdmin;
+                await sock.sendMessage(`${numeroAdmin}@s.whatsapp.net`, {
+                  text: "✅ Bot de fichaje conectado y Back4App accesible. Responde RESUMEN para comprobar los comandos administrativos. Este aviso se envía solo al iniciar la nueva versión."
+                });
+                console.log("✅ Aviso de comprobación enviado al WhatsApp administrador");
+              } catch (error) {
+                console.error("❌ No se pudo enviar aviso de comprobación a administración:", error?.message || error);
+              }
+            }
+          })();
+        }
       }
     });
 
