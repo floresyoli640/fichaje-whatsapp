@@ -80,6 +80,9 @@ app.get("/estado", (req, res) => {
 
 app.get("/qr", async (req, res) => {
   try {
+    if (!process.env.QR_ACCESS_TOKEN || req.query.token !== process.env.QR_ACCESS_TOKEN) {
+      return res.status(403).send("Acceso al QR restringido. Comprueba el enlace de administración.");
+    }
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
