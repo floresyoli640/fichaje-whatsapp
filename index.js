@@ -23,6 +23,7 @@ import makeWASocket, {
 import QRCode from "qrcode";
 import cron from "node-cron";
 import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } from "./comandos-admin.js";
+import { construirMapaLIDs } from "./identidad-whatsapp.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -40,6 +41,8 @@ let sockWA = null;
 // Evita iniciar los cron varias veces
 let recordatoriosIniciados = false;
 let comprobacionArranqueRealizada = false;
+let mapaLIDaTelefono = new Map();
+let promesaMapaLIDs = null;
 
 // Estado global de usuarios esperando ubicación
 const esperandoUbicacion = new Map();
@@ -608,28 +611,22 @@ async function iniciarBot() {
         // Se ejecuta una única vez por arranque para evitar notificaciones duplicadas.
         if (!comprobacionArranqueRealizada) {
           comprobacionArranqueRealizada = true;
-          void (async () => {
+          promesaMapaLIDs = (async () => {
             try {
-              await new Parse.Query("Employees").limit(1).find();
+              const consulta = new Parse.Query("Employees");
+              consulta.equalTo("activo", true);
+              consulta.limit(1000);
+              const empleados = await consulta.find();
               await new Parse.Query("TimeEntries").limit(1).find();
               console.log("✅ Back4App: lectura de Employees y TimeEntries correcta");
+              const numeros = [
+                process.env.ADMIN_WHATSAPP,
+                ...empleados.flatMap(e => [e.get("telefono"), e.get("waId")])
+              ];
+              mapaLIDaTelefono = await construirMapaLIDs(sock, numeros);
+              console.log("✅ Correspondencias LID verificadas por WhatsApp:", mapaLIDaTelefono.size);
             } catch (error) {
-              console.error("❌ Back4App: fallo en comprobación de lectura:", error?.message || error);
-              return;
-            }
-            if (process.env.ADMIN_WHATSAPP) {
-              try {
-                let numeroAdmin = normalizarNumero(process.env.ADMIN_WHATSAPP);
-                if (numeroAdmin.length === 9) numeroAdmin = "34" + numeroAdmin;
-                await sock.sendMessage(`${numeroAdmin}@s.whatsapp.net`, {
-                  text: "✅ Bot de fichaje conectado y Back4App accesible. Responde RESUMEN para comprobar los comandos administrativos. Este aviso se envía solo al iniciar la nueva versión."
-                });
-                console.log("✅ Aviso de comprobación enviado al WhatsApp administrador");
-                const adminLIDConocido = await sock.signalRepository?.lidMapping?.getLIDForPN?.(`${numeroAdmin}@s.whatsapp.net`);
-                console.log("🔐 Correspondencia LID del administrador disponible:", Boolean(adminLIDConocido));
-              } catch (error) {
-                console.error("❌ No se pudo enviar aviso de comprobación a administración:", error?.message || error);
-              }
+              console.error("❌ Falló la comprobación de identidad y base de datos:", error?.message || error);
             }
           })();
         }
@@ -694,6 +691,10 @@ async function iniciarBot() {
             } catch (error) {
               console.warn("⚠️ No se pudo consultar la correspondencia LID del administrador:", error?.message || error);
             }
+          }
+          if (!jidTelefono?.endsWith("@s.whatsapp.net") && rawJid.endsWith("@lid")) {
+            if (promesaMapaLIDs) await promesaMapaLIDs;
+            jidTelefono = mapaLIDaTelefono.get(rawJid) || jidTelefono;
           }
           if (!jidTelefono?.endsWith("@s.whatsapp.net")) {
             console.warn("⚠️ Mensaje desde LID sin correspondencia de teléfono: no se registra ningún fichaje.");
