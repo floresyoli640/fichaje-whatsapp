@@ -88,3 +88,67 @@ test("Bloquea comandos si no hay calendario configurado", async () => {
     else process.env.FESTIVOS_UBEDA_2026 = festivosPrevio;
   }
 });
+
+test("CONFIRMAR TODOS puede guardar una confirmación administrativa para los seis sin inventar fichajes", async () => {
+  const { prepararConfirmacion, confirmarJornada } = await import("../jornadas-admin.js");
+  const filas = new Map();
+  class Registro {
+    constructor() { this.valores = {}; this.id = "registro"; }
+    get(k) { return this.valores[k]; }
+    set(k, v) { this.valores[k] = v; }
+    unset(k) { delete this.valores[k]; }
+    async save() { filas.set(this.get("clave"), this); }
+  }
+  class Query {
+    equalTo(k, v) { this.clave = v; }
+    async first() { return filas.get(this.clave) || null; }
+  }
+  const cliente = { Object: { extend: () => Registro }, Query };
+  for (let i = 1; i <= 6; i++) {
+    const d = prepararConfirmacion({ marcas: {} });
+    assert.deepEqual([d.entrada, d.salida], ["08:00", "15:00"]);
+    assert.equal(d.pendiente, true);
+    const r = await confirmarJornada({
+      empleadoId: String(i), fecha: "2026-10-29",
+      administrador: "34600000000", entrada: d.entrada, salida: d.salida,
+      fuenteEntrada: d.fuenteEntrada, fuenteSalida: d.fuenteSalida,
+      cliente
+    });
+    assert.equal(r.creada, true);
+  }
+  assert.equal(filas.size, 6);
+  for (const registro of filas.values()) {
+    assert.equal(registro.get("estado"), "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION");
+    assert.equal(registro.get("entradaReferencia"), "08:00");
+    assert.equal(registro.get("salidaReferencia"), "15:00");
+    assert.equal(registro.get("fuenteEntrada"), "horario_previsto");
+    assert.equal(registro.get("entradaVerificada"), undefined);
+    assert.equal(registro.get("salidaVerificada"), undefined);
+  }
+  const repetida = await confirmarJornada({
+    empleadoId: "1", fecha: "2026-10-29", administrador: "34600000000",
+    entrada: "08:00", salida: "15:00",
+    fuenteEntrada: "horario_previsto", fuenteSalida: "horario_previsto", cliente
+  });
+  assert.equal(repetida.creada, false);
+  assert.equal(repetida.actualizada, false);
+  assert.equal(filas.size, 6);
+});
+
+test("Conserva las horas realmente registradas y distingue la salida prevista", async () => {
+  const { prepararConfirmacion } = await import("../jornadas-admin.js");
+  const d = prepararConfirmacion({
+    marcas: { entrada: new Date("2026-10-29T07:08:00Z") }
+  });
+  assert.equal(d.entrada, "08:08");
+  assert.equal(d.salida, "15:00");
+  assert.equal(d.fuenteEntrada, "fichaje_real");
+  assert.equal(d.fuenteSalida, "horario_previsto");
+  assert.equal(d.pendiente, true);
+  const correccion = { get: campo => ({
+    entradaCorregida: "08:05", salidaCorregida: "15:03"
+  })[campo] };
+  const corregida = prepararConfirmacion({ correccion });
+  assert.equal(corregida.pendiente, false);
+  assert.equal(corregida.fuenteEntrada, "correccion_documentada");
+});
