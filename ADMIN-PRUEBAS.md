@@ -1,6 +1,6 @@
 # Gestión administrativa por WhatsApp (PRUEBAS)
 
-Esta rama NO debe desplegarse todavía. Mantiene ENTRADA/SALIDA y sus recordatorios.
+Esta rama NO debe desplegarse todavía. No se han ejecutado pruebas de integración con Railway ni Back4App. Mantiene ENTRADA/SALIDA y sus recordatorios.
 
 ## Variables privadas de Railway
 - `ADMIN_WHATSAPP`: número del administrador con prefijo internacional (no guardarlo en GitHub).
@@ -9,13 +9,14 @@ Esta rama NO debe desplegarse todavía. Mantiene ENTRADA/SALIDA y sus recordator
 ## Comandos (solo chat individual del administrador)
 - `RESUMEN`: muestra jornadas previstas y ausencias del día.
 - `AUSENTE Nombre Apellidos`: registra una ausencia (nombre exacto y único).
-- `CONFIRMAR TODOS`: declaración administrativa explícita de que se ha verificado la jornada habitual de los empleados no marcados como ausentes.
+- `CORREGIR Nombre Apellidos HH:MM HH:MM motivo`: deja una corrección auditada sin alterar las marcas originales.
+- `CONFIRMAR TODOS`: valida las horas de marcas existentes o de correcciones documentadas; deja pendientes las jornadas incompletas.
 
 Las confirmaciones se guardan en `ConfirmacionesJornada`, **no** en `TimeEntries`, y no equivalen a fichajes de dispositivo/GPS. No se generan minutos aleatorios. El resumen se programa a las 15:05 (Europe/Madrid).
 
 ## Pendiente antes de producción
 - Confirmar y configurar el calendario laboral oficial de Úbeda y actualizarlo cada año.
-- Implementar correcciones de horarios reales y vacaciones, y resolver fichajes manuales existentes antes de la confirmación en bloque.
+- Implementar vacaciones y permisos, y revisar la compatibilidad de correcciones y fichajes existentes antes de la confirmación en bloque.
 - Verificar autorización de WhatsApp (incluidos identificadores LID), permisos de lectura/escritura de Back4App y prevención de duplicados concurrentes.
 - Probar en entorno aislado con datos ficticios; revisar política de retención y acceso.
 - Trasladar credenciales Back4App presentes en `index.js` a variables de entorno y rotarlas.
