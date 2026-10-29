@@ -625,6 +625,8 @@ async function iniciarBot() {
                   text: "✅ Bot de fichaje conectado y Back4App accesible. Responde RESUMEN para comprobar los comandos administrativos. Este aviso se envía solo al iniciar la nueva versión."
                 });
                 console.log("✅ Aviso de comprobación enviado al WhatsApp administrador");
+                const adminLIDConocido = await sock.signalRepository?.lidMapping?.getLIDForPN?.(`${numeroAdmin}@s.whatsapp.net`);
+                console.log("🔐 Correspondencia LID del administrador disponible:", Boolean(adminLIDConocido));
               } catch (error) {
                 console.error("❌ No se pudo enviar aviso de comprobación a administración:", error?.message || error);
               }
@@ -680,6 +682,18 @@ async function iniciarBot() {
             jidTelefono = msg.key.remoteJidAlt?.endsWith("@s.whatsapp.net")
               ? msg.key.remoteJidAlt
               : await sock.signalRepository?.lidMapping?.getPNForLID?.(rawJid);
+          }
+          // Algunos mensajes omiten el PN alternativo aunque Baileys conozca el LID del admin.
+          // Comprobar la asociación inversa sin asumir jamás que un LID desconocido es el admin.
+          if (!jidTelefono?.endsWith("@s.whatsapp.net") && rawJid.endsWith("@lid") && process.env.ADMIN_WHATSAPP) {
+            const adminNumero = normalizarNumero(process.env.ADMIN_WHATSAPP);
+            const adminPN = `${adminNumero.length === 9 ? "34" + adminNumero : adminNumero}@s.whatsapp.net`;
+            try {
+              const adminLID = await sock.signalRepository?.lidMapping?.getLIDForPN?.(adminPN);
+              if (adminLID && adminLID.split("@")[0] === rawJid.split("@")[0]) jidTelefono = adminPN;
+            } catch (error) {
+              console.warn("⚠️ No se pudo consultar la correspondencia LID del administrador:", error?.message || error);
+            }
           }
           if (!jidTelefono?.endsWith("@s.whatsapp.net")) {
             console.warn("⚠️ Mensaje desde LID sin correspondencia de teléfono: no se registra ningún fichaje.");
