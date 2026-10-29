@@ -26,6 +26,7 @@ import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } 
 import { construirMapaLIDs } from "./identidad-whatsapp.js";
 import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
+import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -898,6 +899,10 @@ cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
   timezone: "Europe/Madrid"
 });
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
+// Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
+void comprobarRegistrosBack4App()
+  .then(resultado => console.log("✅ VERIFICACIÓN REAL BACK4APP:", JSON.stringify(resultado)))
+  .catch(error => console.error("❌ VERIFICACIÓN REAL BACK4APP:", error?.message || error));
 
 // Una ejecución controlada solicitada explícitamente por administración para la fecha indicada.
 // No convierte horarios previstos en fichajes GPS; solo crea confirmaciones auditadas.
