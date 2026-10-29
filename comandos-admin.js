@@ -133,22 +133,23 @@ export async function procesarComandoAdmin({ texto, numero, responder }) {
     for (const c of correcciones) if (!ultimasCorrecciones.has(c.get("empleadoId"))) ultimasCorrecciones.set(c.get("empleadoId"), c);
     // Confirmación administrativa explícita, NO fichajes de dispositivo ni GPS.
     let guardados = 0;
-    const pendientes = [];
+    let pendientesVerificacion = 0;
+    let conEvidencia = 0;
+    let yaGuardadas = 0;
     for (const e of presentes) {
       const marcas = await fichajesDelDia(e, fecha);
-      const correccion = ultimasCorrecciones.get(e.id);
-      if (!correccion && (!marcas.entrada || !marcas.salida || marcas.salida <= marcas.entrada)) {
-        pendientes.push(e.get("nombre") || e.id);
-        continue;
-      }
-      await confirmarJornada({
+      const datos = prepararConfirmacion({ marcas, correccion: ultimasCorrecciones.get(e.id) });
+      const registro = await confirmarJornada({
         empleadoId: e.id, fecha, administrador: numero,
-        entradaReal: correccion ? correccion.get("entradaCorregida") : horaLocal(marcas.entrada),
-        salidaReal: correccion ? correccion.get("salidaCorregida") : horaLocal(marcas.salida)
+        entrada: datos.entrada, salida: datos.salida,
+        fuenteEntrada: datos.fuenteEntrada, fuenteSalida: datos.fuenteSalida
       });
       guardados++;
+      if (datos.pendiente) pendientesVerificacion++;
+      else conEvidencia++;
+      if (!registro.creada && !registro.actualizada) yaGuardadas++;
     }
-    await responder(`✅ ${guardados} jornadas confirmadas con fichajes o correcciones documentadas. ${faltas.length} ausencias. ${pendientes.length} pendientes: ${pendientes.join(", ") || "ninguna"}. No se han creado fichajes en TimeEntries.`);
+    await responder(`✅ ${guardados} jornadas registradas por administración: ${conEvidencia} con evidencia completa y ${pendientesVerificacion} con horas previstas pendientes de verificar. ${faltas.length} ausencias; ${yaGuardadas} ya guardadas. Las horas sin fichaje son referencias del horario 08:00–15:00, NO fichajes GPS. Envía RESUMEN para verlas.`);
     return true;
   } catch (error) {
     await responder(`⚠️ No se completó la operación: ${error.message}`);
