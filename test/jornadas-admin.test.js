@@ -12,14 +12,14 @@ test("Normaliza teléfono español sin revelar la configuración", () => {
 
 test("Detecta laborables y excluye fines de semana y festivos", () => {
   const festivos = new Set(["2026-12-08"]);
-  assert.equal(esLaborable("2026-12-07", festivos), true);
+  assert.equal(esLaborable("2026-12-09", festivos), true);
   assert.equal(esLaborable("2026-12-08", festivos), false);
   assert.equal(esLaborable("2026-12-12", festivos), false);
 });
 
 test("Solo planifica empleados activos no exentos", async () => {
   const empleado = (id, nombre, activo, exentoFichaje) => ({ id, get: key => ({ nombre, activo, exentoFichaje })[key] });
-  const resultado = await obtenerJornadasPrevistas("2026-12-07", [
+  const resultado = await obtenerJornadasPrevistas("2026-12-09", [
     empleado("1", "Ana", true, false),
     empleado("2", "Luis", false, false),
     empleado("3", "Eva", true, true)
