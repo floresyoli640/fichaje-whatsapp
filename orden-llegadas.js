@@ -31,7 +31,7 @@ export function ordenarPorOrdenHabitual(empleados) {
 }
 
 // Orden ORIENTATIVO diario de horas programadas.
-// María de la O va primero; Yolanda, segunda en ~80 % de los días (tercera el resto).
+// María de la O va primero; Yolanda, segunda en ~90 % de los días (tercera el resto).
 // Esto no constituye evidencia de cuál fue el orden real de llegada.
 export function ordenPrevistoParaFecha(empleados, fecha) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error("Fecha de planificación inválida");
@@ -45,7 +45,7 @@ export function ordenPrevistoParaFecha(empleados, fecha) {
     });
   const salida = [];
   if (primera) salida.push(primera);
-  const yolandaSegunda = indiceAleatorioEstable(fecha + ":yolanda-posicion") % 10 < 8;
+  const yolandaSegunda = indiceAleatorioEstable(fecha + ":yolanda-posicion") % 10 < 9;
   if (yolanda && (yolandaSegunda || !otros.length)) salida.push(yolanda);
   if (yolanda && !yolandaSegunda && otros.length) {
     salida.push(otros.shift(), yolanda);
