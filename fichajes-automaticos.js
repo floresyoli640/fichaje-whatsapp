@@ -1,10 +1,24 @@
 // Crea marcajes de HORARIO TEÓRICO en TimeEntries, claramente sin verificación de presencia.
 // Nunca afirma que un empleado estuviera físicamente presente ni inventa coordenadas GPS.
 import Parse from "parse/node.js";
+import { createHash } from "node:crypto";
 import { fechaLocal, numeroNormalizado, HORARIO } from "./jornadas-admin.js";
 import { esDiaLaborableConfigurado } from "./comandos-admin.js";
 
 export const ORIGEN_AUTOMATICO = "horario_programado_sin_verificar";
+export const VARIACION_MAXIMA_MINUTOS = 5;
+
+// Variación pseudoaleatoria estable por persona, fecha y acción.
+// En un reinicio, la hora asignada a esa persona no cambia.
+export function variacionMinutos(empleadoId, fecha, accion) {
+  if (!empleadoId || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !["ENTRADA", "SALIDA"].includes(accion)) {
+    throw new Error("Identidad, fecha o acción inválida para generar la variación");
+  }
+  const contenido = `${empleadoId}:${fecha}:${accion}`;
+  const valor = createHash("sha256").update(contenido).digest().readUInt32BE(0);
+  return valor % (2 * VARIACION_MAXIMA_MINUTOS + 1) - VARIACION_MAXIMA_MINUTOS;
+}
+
 export function esMarcajeAutomatico(registro) {
   return registro?.get("origen") === ORIGEN_AUTOMATICO;
 }
@@ -53,9 +67,9 @@ export async function registrarFichajesAutomaticos({
   if (!esDiaLaborableConfigurado(fecha)) { respuesta.causa = "dia_no_laborable"; return respuesta; }
 
   const pendientes = [
-    { accion: "ENTRADA", fechaMarcaje: fechaHoraMadrid(fecha, HORARIO.entrada) },
-    { accion: "SALIDA", fechaMarcaje: fechaHoraMadrid(fecha, HORARIO.salida) }
-  ].filter(m => ahora >= m.fechaMarcaje);
+    { accion: "ENTRADA", horaBase: HORARIO.entrada, fechaBase: fechaHoraMadrid(fecha, HORARIO.entrada) },
+    { accion: "SALIDA", horaBase: HORARIO.salida, fechaBase: fechaHoraMadrid(fecha, HORARIO.salida) }
+  ].filter(m => ahora.getTime() >= m.fechaBase.getTime() - VARIACION_MAXIMA_MINUTOS * 60000);
   if (!pendientes.length) { respuesta.causa = "horario_todavia_no_iniciado"; return respuesta; }
 
   const qe = new cliente.Query("Employees");
@@ -85,6 +99,10 @@ export async function registrarFichajesAutomaticos({
     const numeros = numerosDelEmpleado(empleado);
     if (!numeros.length) { respuesta.omitidosSinNumero++; continue; }
     for (const pendiente of pendientes) {
+      const diferenciaMinutos = variacionMinutos(empleado.id, fecha, pendiente.accion);
+      const fechaMarcaje = new Date(pendiente.fechaBase.getTime() + diferenciaMinutos * 60000);
+      // La hora provisional se guarda cuando realmente llega su turno.
+      if (ahora < fechaMarcaje) continue;
       const encontrado = existentes.some(r =>
         r.get("accion") === pendiente.accion && corresponde(r, empleado, numeros)
       );
@@ -97,7 +115,11 @@ export async function registrarFichajesAutomaticos({
       registro.set("numero", numeros[0]);
       if (empleado.get("empresa")) registro.set("empresa", empleado.get("empresa"));
       registro.set("accion", pendiente.accion);
-      registro.set("fecha", pendiente.fechaMarcaje);
+      registro.set("fecha", fechaMarcaje);
+      registro.set("horaProgramada", pendiente.horaBase);
+      registro.set("variacionAleatoriaMinutos", diferenciaMinutos);
+      registro.set("margenAleatorioMinutos", VARIACION_MAXIMA_MINUTOS);
+      registro.set("horaReferenciaSinVerificar", true);
       registro.set("origen", ORIGEN_AUTOMATICO);
       registro.set("estado", "AUTOMATICO_PENDIENTE_VERIFICACION");
       registro.set("provisional", true);
@@ -106,7 +128,7 @@ export async function registrarFichajesAutomaticos({
       registro.set("fechaLaboral", fecha);
       registro.set("claveAutomatica", `${empleado.id}:${fecha}:${pendiente.accion}`);
       registro.set("registradoEn", new Date(ahora));
-      registro.set("observacion", "Hora programada automáticamente: NO acredita presencia ni fichaje GPS.");
+      registro.set("observacion", "Hora programada con variación aleatoria de hasta ±5 min: NO acredita presencia ni fichaje GPS.");
       await registro.save();
       existentes.push(registro);
       if (pendiente.accion === "ENTRADA") respuesta.entradasNuevas++;
