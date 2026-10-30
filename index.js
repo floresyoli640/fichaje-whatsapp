@@ -29,6 +29,7 @@ import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { registrarFichajeWhatsApp } from "./fichaje-manual.js";
 import { enviarMenuAdmin, interpretarSeleccionAdmin, interpretarNumeroAdmin } from "./menu-admin.js";
+import { enviarMenuDiarioProgramado, CRON_MENU_DIARIO, ZONA_MENU_DIARIO } from "./menu-diario-programado.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { auditarHistoria } from "./auditoria-historica.js";
 import { reconstruirHistorico } from "./reconstruccion-historica.js";
@@ -543,6 +544,9 @@ async function iniciarBot() {
         console.log("✅ Conectado a WhatsApp");
 
         iniciarRecordatorios();
+        // Si vuelve la conexión entre 15:30 y 15:59, entrega el menú pendiente.
+        void enviarMenuDiarioProgramado({ sock, conectado: true })
+          .catch(error => console.error("❌ No se pudo reintentar el menú de administración al reconectar:", error?.message || error));
         // Verificación real de lectura de Back4App y prueba de envío al número administrador.
         // Se ejecuta una única vez por arranque para evitar notificaciones duplicadas.
         if (!comprobacionArranqueRealizada) {
@@ -756,6 +760,24 @@ async function crearMarcajesProgramados() {
   }
 }
 cron.schedule("* * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
+
+// Envío automático TODOS los días a las 15:30 (Madrid).
+// Reintenta hasta las 15:59 si WhatsApp no estaba conectado, y no repite una fecha enviada.
+cron.schedule(CRON_MENU_DIARIO, async () => {
+  try {
+    const resultado = await enviarMenuDiarioProgramado({
+      sock: sockWA,
+      conectado: estadoWA === "conectado"
+    });
+    if (resultado.estado === "whatsapp_desconectado" &&
+        new Intl.DateTimeFormat("en-GB", { timeZone: ZONA_MENU_DIARIO,
+          hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date()) === "15:30") {
+      console.warn("⚠️ Menú de las 15:30 pendiente: WhatsApp desconectado; se reintentará durante esta media hora.");
+    }
+  } catch (error) {
+    console.error("❌ Error en el envío del menú diario 15:30:", error?.message || error);
+  }
+}, { timezone: ZONA_MENU_DIARIO });
 void crearMarcajesProgramados(); // Reanuda las marcas vencidas sin duplicarlas.
 
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
