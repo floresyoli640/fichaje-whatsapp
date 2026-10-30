@@ -102,14 +102,19 @@ async function resumen(fecha, empleados, faltas, detallado = false) {
   return detallado ? textoDetalleJornadas(estado, horaLocal) : textoResumenCorto(estado);
 }
 
-export async function procesarComandoAdmin({ texto, numero, responder, canalConfirmacion = "whatsapp" }) {
+export async function procesarComandoAdmin({ texto, numero, responder, enviarMenu = null, canalConfirmacion = "whatsapp" }) {
   const comando = texto.trim();
-  if (!/^(?:RESUMEN|DETALLE|VERIFICAR BD|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
+  if (!/^(?:MENU|MENÚ|RESUMEN|DETALLE|VERIFICAR BD|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
     await responder("⛔ Comando reservado a administración.");
     return true;
   }
   try {
+    if (/^MEN[UÚ]$/i.test(comando)) {
+      if (enviarMenu) await enviarMenu();
+      else await responder("📱 Menú: 1 RESUMEN · 2 CONFIRMAR TODOS · 3 DETALLE. También puedes escribir cada comando.");
+      return true;
+    }
     const fecha = fechaLocal();
     const calendario = festivos(fecha);
     if (!esLaborable(fecha, calendario)) {
