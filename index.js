@@ -27,6 +27,7 @@ import { construirMapaLIDs } from "./identidad-whatsapp.js";
 import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
+import { registrarFichajeWhatsApp } from "./fichaje-manual.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { auditarHistoria } from "./auditoria-historica.js";
 import { reconstruirHistorico } from "./reconstruccion-historica.js";
@@ -50,9 +51,6 @@ let recordatoriosIniciados = false;
 let comprobacionArranqueRealizada = false;
 let mapaLIDaTelefono = new Map();
 let promesaMapaLIDs = null;
-
-// Estado global de usuarios esperando ubicación
-const esperandoUbicacion = new Map();
 
 // Evita procesar el mismo mensaje dos veces
 const mensajesProcesados = new Set();
@@ -170,27 +168,6 @@ function obtenerTexto(msg) {
   return "";
 }
 
-function obtenerUbicacion(msg) {
-  const message = obtenerMensajeReal(msg.message);
-
-  if (message?.locationMessage) {
-    return {
-      latitud: message.locationMessage.degreesLatitude,
-      longitud: message.locationMessage.degreesLongitude,
-      tipo: "ubicacion_actual"
-    };
-  }
-
-  if (message?.liveLocationMessage) {
-    return {
-      latitud: message.liveLocationMessage.degreesLatitude,
-      longitud: message.liveLocationMessage.degreesLongitude,
-      tipo: "ubicacion_tiempo_real"
-    };
-  }
-
-  return null;
-}
 
 // ===============================
 //   BASE DE DATOS
@@ -299,53 +276,6 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   return empleado;
 }
 
-async function guardarFichajeEnBack4app({
-  empleadoId,
-  nombre,
-  dni,
-  numero,
-  empresa,
-  accion,
-  latitud,
-  longitud
-}) {
-  const TimeEntries = Parse.Object.extend("TimeEntries");
-  const entry = new TimeEntries();
-
-  entry.set("nombre", nombre);
-  entry.set("dni", dni);
-  entry.set("numero", numero);
-  entry.set("accion", accion);
-  entry.set("fecha", new Date());
-  if (empleadoId) entry.set("empleadoId", empleadoId);
-  entry.set("origen", "whatsapp_ubicacion");
-  entry.set("estado", "FICHAJE_REAL");
-  entry.set("provisional", false);
-  entry.set("pendienteVerificacion", false);
-  entry.set("registradoEn", new Date());
-
-  if (empresa && typeof empresa.get === "function") {
-    entry.set("empresa", empresa);
-  }
-
-  if (Number.isFinite(latitud) && Number.isFinite(longitud)) {
-    entry.set(
-      "ubicacion",
-      new Parse.GeoPoint({
-        latitude: latitud,
-        longitude: longitud
-      })
-    );
-  }
-
-  try {
-    await entry.save();
-    console.log("✔ Fichaje guardado en TimeEntries (Back4App)");
-  } catch (e) {
-    console.error("❌ Error guardando fichaje:", e);
-    throw e;
-  }
-}
 
 // ===============================
 //   RECORDATORIOS DE FICHAJE
@@ -671,11 +601,10 @@ async function iniciarBot() {
 
           console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
-          const mensajeReal = obtenerMensajeReal(msg.message);
           const texto = obtenerTexto(msg).trim().toUpperCase();
-          const ubicacionRecibida = obtenerUbicacion(msg);
-          // Ignorar mensajes de protocolo, sincronización y otros eventos sin contenido del usuario.
-          if (!texto && !ubicacionRecibida) continue;
+          // No inspeccionar ni guardar coordenadas: el fichaje funciona en teletrabajo.
+          // Las ubicaciones enviadas por error, sin texto, se ignoran.
+          if (!texto) continue;
 
           // WhatsApp puede entregar chats particulares usando LID en vez del teléfono.
           // Solo asociar el mensaje a un empleado/admin cuando hay un número verificable.
@@ -710,110 +639,13 @@ async function iniciarBot() {
           }
           const numero = normalizarNumero(jidTelefono.split("@")[0]);
 
-          console.log("📩 Mensaje recibido:", texto || "[ubicación]");
-          if (ubicacionRecibida) {
-            console.log("📍 Tipo de ubicación:", ubicacionRecibida.tipo);
-          }
+          console.log("📩 Mensaje recibido:", texto);
 
           // Los comandos administrativos solo se aceptan en chats individuales.
           if (await procesarComandoAdmin({
             texto, numero,
             responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
           })) continue;
-
-          // ===============================
-          //   SI ESTÁ ESPERANDO UBICACIÓN
-          // ===============================
-          if (esperandoUbicacion.has(numero) && ubicacionRecibida) {
-            const { accion, empleado } = esperandoUbicacion.get(numero);
-
-            const nombre = empleado.get("nombre") || "-";
-            const dni = empleado.get("dni") || "-";
-            const empresa = empleado.get("empresa");
-
-            const latitud = ubicacionRecibida.latitud;
-            const longitud = ubicacionRecibida.longitud;
-
-            if (!Number.isFinite(latitud) || !Number.isFinite(longitud)) {
-              await sock.sendMessage(msg.key.remoteJid, {
-                text:
-                  "⚠️ No he podido leer correctamente tu ubicación.\n\n" +
-                  "Por favor envíala de nuevo desde el clip 📎 → Ubicación → Ubicación actual."
-              });
-              continue;
-            }
-
-            console.log(
-              `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
-            );
-
-            const puntoFichaje = new Parse.GeoPoint({
-              latitude: latitud,
-              longitude: longitud
-            });
-
-            const ubicacionEmpresa = empresa?.get("ubicacion");
-
-            if (ubicacionEmpresa instanceof Parse.GeoPoint) {
-              const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
-              const distanciaMetros = distanciaKm * 1000;
-
-              console.log(
-                `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
-              );
-
-              if (distanciaMetros > 40) {
-                await sock.sendMessage(msg.key.remoteJid, {
-                  text:
-                    "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
-                    "Para fichar debes estar en la oficina 🔫😉"
-                });
-                continue;
-              }
-            } else {
-              console.log(
-                "⚠️ La empresa no tiene 'ubicacion' GeoPoint configurada. Se admite fichaje igualmente."
-              );
-            }
-
-            const telefonoBD = empleado.get("telefono");
-            const waIdBD = empleado.get("waId");
-
-            const numeroParaRegistro = telefonoBD
-              ? normalizarNumero(telefonoBD)
-              : waIdBD
-                ? normalizarNumero(waIdBD)
-                : numero;
-
-            await guardarFichajeEnBack4app({
-              empleadoId: empleado.id,
-              nombre,
-              dni,
-              numero: numeroParaRegistro,
-              empresa,
-              accion,
-              latitud,
-              longitud
-            });
-
-            esperandoUbicacion.delete(numero);
-
-            await sock.sendMessage(msg.key.remoteJid, {
-              text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
-            });
-
-            continue;
-          }
-
-          if (esperandoUbicacion.has(numero) && !ubicacionRecibida) {
-            await sock.sendMessage(msg.key.remoteJid, {
-              text:
-                "⚠️ Estaba esperando tu ubicación.\n\n" +
-                "Por favor envíala desde el clip 📎 o botón + → Ubicación → Ubicación actual.\n\n" +
-                "No envíes ubicación en tiempo real."
-            });
-            continue;
-          }
 
           // ===============================
           //   ENTRADA / SALIDA
@@ -849,15 +681,14 @@ async function iniciarBot() {
             }
 
             const nombre = empleado.get("nombre") || "-";
-
-            esperandoUbicacion.set(numero, { accion, empleado });
-
+            const registro = await registrarFichajeWhatsApp({ empleado, accion, numero });
+            const hora = new Intl.DateTimeFormat("es-ES", {
+              timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+            }).format(registro.fecha);
             await sock.sendMessage(msg.key.remoteJid, {
-              text:
-                `Hola, ${nombre}.\n\n` +
-                `Para registrar tu *${accion}*, envíame ahora tu ubicación actual.\n\n` +
-                `En iPhone: pulsa el botón + o el clip 📎 → Ubicación → *Enviar ubicación actual*.\n\n` +
-                `No envíes ubicación en tiempo real.`
+              text: registro.creada
+                ? `✅ ${accion} guardada en Back4App a las *${hora}*. Gracias, ${nombre}. No necesitas enviar ubicación, también si teletrabajas.`
+                : `ℹ️ Ya tenías una ${accion} comunicada por WhatsApp hoy, a las *${hora}*. No he creado un duplicado.`
             });
 
             continue;
