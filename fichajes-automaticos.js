@@ -4,6 +4,7 @@ import Parse from "parse/node.js";
 import { createHash } from "node:crypto";
 import { fechaLocal, numeroNormalizado, HORARIO } from "./jornadas-admin.js";
 import { esDiaLaborableConfigurado } from "./comandos-admin.js";
+import { desfasesProgramadosEntrada } from "./orden-llegadas.js";
 
 export const ORIGEN_AUTOMATICO = "horario_programado_sin_verificar";
 export const VARIACION_MAXIMA_MINUTOS = 5;
@@ -88,6 +89,10 @@ export async function registrarFichajesAutomaticos({
   qa.equalTo("fechaLaboral", fecha);
   qa.limit(1000);
   const ausencias = new Set((await qa.find()).map(a => a.get("empleadoId")));
+  // Solo preferencias de HORARIOS TEÓRICOS de entrada, no hechos observados.
+  const desfasesEntrada = desfasesProgramadosEntrada(
+    empleados.filter(e => !ausencias.has(e.id)), fecha
+  );
 
   // Consultar también fichajes antiguos (sin empleadoId ni origen).
   const qt = new cliente.Query("TimeEntries");
@@ -104,7 +109,9 @@ export async function registrarFichajesAutomaticos({
     const numeros = numerosDelEmpleado(empleado);
     if (!numeros.length) { respuesta.omitidosSinNumero++; continue; }
     for (const pendiente of pendientes) {
-      const diferenciaMinutos = variacionMinutos(empleado.id, fecha, pendiente.accion);
+      const diferenciaMinutos = pendiente.accion === "ENTRADA"
+        ? desfasesEntrada.get(empleado.id)
+        : variacionMinutos(empleado.id, fecha, pendiente.accion);
       const fechaMarcaje = new Date(pendiente.fechaBase.getTime() + diferenciaMinutos * 60000);
       // La hora provisional se guarda cuando realmente llega su turno.
       if (ahora < fechaMarcaje) continue;
@@ -135,7 +142,7 @@ export async function registrarFichajesAutomaticos({
       registro.set("registradoEn", new Date(ahora));
       registro.set("observacion", pendiente.accion === "SALIDA"
         ? "Salida programada automáticamente entre 15:00 y 15:05: NO acredita presencia ni fichaje GPS."
-        : "Entrada programada automáticamente entre 07:55 y 08:05: NO acredita presencia ni fichaje GPS.");
+        : "Entrada automática provisional entre 07:55 y 08:05, con preferencia de orden habitual orientativo. NO acredita orden de llegada real, presencia ni fichaje GPS.");
       await registro.save();
       existentes.push(registro);
       if (pendiente.accion === "ENTRADA") respuesta.entradasNuevas++;
