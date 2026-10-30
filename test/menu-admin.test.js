@@ -11,7 +11,7 @@ const JID = "34600000000@s.whatsapp.net";
 test("Hay cuatro acciones repartidas en bloques de máximo tres botones", () => {
   assert.deepEqual(OPCIONES_ADMIN.map(x => x.comando),
     ["RESUMEN", "CONFIRMAR TODOS", "DETALLE", "VERIFICAR BD"]);
-  assert.equal(new Set(OPCIONES_ADMIN.map(x => x.id)).size, 3);
+  assert.equal(new Set(OPCIONES_ADMIN.map(x => x.id)).size, 4);
   const msg = construirMensajeBotonesAdmin();
   const interactivo = msg.viewOnceMessage.message.interactiveMessage;
   assert.equal(interactivo.nativeFlowMessage.buttons.length, 3);
