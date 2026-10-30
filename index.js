@@ -486,8 +486,13 @@ function iniciarRecordatorios() {
 
   cron.schedule("5 15 * * 1-5", async () => {
     if (sockWA && estadoWA === "conectado") {
-      try { await enviarResumenDiario(sockWA); }
-      catch (e) { console.error("Error enviando resumen administrativo:", e); }
+      try {
+        // Incluir los últimos horarios provisionales (hasta +5 minutos) en el resumen.
+        await crearMarcajesProgramados();
+        await enviarResumenDiario(sockWA);
+      } catch (e) {
+        console.error("Error enviando resumen administrativo:", e);
+      }
     }
   }, { timezone: "Europe/Madrid" });
 
@@ -893,23 +898,27 @@ async function asegurarPlanificacionDiaria() {
 cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
   timezone: "Europe/Madrid"
 });
-// Se crean marcajes programados sin verificar al llegar 08:00 y 15:00 (Madrid).
-// Reintentos idempotentes de cinco minutos, incluso aunque WhatsApp esté desconectado.
-// No se envían avisos a trabajadores.
-let procesandoAutomaticos = false;
+// Horarios provisionales distribuidos entre 07:55–08:05 y 14:55–15:05.
+ // Se comprueba cada minuto, sin recordatorios, incluso si WhatsApp no está conectado.
+let promesaAutomaticos = null;
 async function crearMarcajesProgramados() {
-  if (procesandoAutomaticos) return;
-  procesandoAutomaticos = true;
+  if (promesaAutomaticos) return promesaAutomaticos;
+  const tarea = (async () => {
+    try {
+      await registrarFichajesAutomaticos();
+    } catch (error) {
+      console.error("❌ No se pudieron registrar los marcajes automáticos:", error?.message || error);
+    }
+  })();
+  promesaAutomaticos = tarea;
   try {
-    await registrarFichajesAutomaticos();
-  } catch (error) {
-    console.error("❌ No se pudieron registrar los marcajes automáticos:", error?.message || error);
+    await tarea;
   } finally {
-    procesandoAutomaticos = false;
+    if (promesaAutomaticos === tarea) promesaAutomaticos = null;
   }
 }
-cron.schedule("*/5 * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
-void crearMarcajesProgramados(); // Recupera entradas pendientes al arrancar, nunca adelanta salidas.
+cron.schedule("* * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
+void crearMarcajesProgramados(); // Reanuda las marcas vencidas sin duplicarlas.
 
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
 // Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
