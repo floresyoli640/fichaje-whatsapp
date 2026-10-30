@@ -22,6 +22,18 @@ import makeWASocket, {
 
 import QRCode from "qrcode";
 import cron from "node-cron";
+import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } from "./comandos-admin.js";
+import { construirMapaLIDs } from "./identidad-whatsapp.js";
+import { fechaLocal } from "./jornadas-admin.js";
+import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
+import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
+import { registrarFichajeWhatsApp } from "./fichaje-manual.js";
+import { enviarMenuAdmin, interpretarSeleccionAdmin, interpretarNumeroAdmin } from "./menu-admin.js";
+import { enviarMenuDiarioProgramado, CRON_MENU_DIARIO, ZONA_MENU_DIARIO } from "./menu-diario-programado.js";
+import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
+import { auditarHistoria } from "./auditoria-historica.js";
+import { reconstruirHistorico } from "./reconstruccion-historica.js";
+import { ajustarEntradasProvisionales30Oct } from "./ajuste-entradas-30oct.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -38,9 +50,9 @@ let sockWA = null;
 
 // Evita iniciar los cron varias veces
 let recordatoriosIniciados = false;
-
-// Estado global de usuarios esperando ubicación
-const esperandoUbicacion = new Map();
+let comprobacionArranqueRealizada = false;
+let mapaLIDaTelefono = new Map();
+let promesaMapaLIDs = null;
 
 // Evita procesar el mismo mensaje dos veces
 const mensajesProcesados = new Set();
@@ -79,6 +91,9 @@ app.get("/estado", (req, res) => {
 
 app.get("/qr", async (req, res) => {
   try {
+    if (!process.env.QR_ACCESS_TOKEN || req.query.token !== process.env.QR_ACCESS_TOKEN) {
+      return res.status(403).send("Acceso al QR restringido. Comprueba el enlace de administración.");
+    }
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
@@ -155,27 +170,6 @@ function obtenerTexto(msg) {
   return "";
 }
 
-function obtenerUbicacion(msg) {
-  const message = obtenerMensajeReal(msg.message);
-
-  if (message?.locationMessage) {
-    return {
-      latitud: message.locationMessage.degreesLatitude,
-      longitud: message.locationMessage.degreesLongitude,
-      tipo: "ubicacion_actual"
-    };
-  }
-
-  if (message?.liveLocationMessage) {
-    return {
-      latitud: message.liveLocationMessage.degreesLatitude,
-      longitud: message.liveLocationMessage.degreesLongitude,
-      tipo: "ubicacion_tiempo_real"
-    };
-  }
-
-  return null;
-}
 
 // ===============================
 //   BASE DE DATOS
@@ -284,45 +278,6 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
   return empleado;
 }
 
-async function guardarFichajeEnBack4app({
-  nombre,
-  dni,
-  numero,
-  empresa,
-  accion,
-  latitud,
-  longitud
-}) {
-  const TimeEntries = Parse.Object.extend("TimeEntries");
-  const entry = new TimeEntries();
-
-  entry.set("nombre", nombre);
-  entry.set("dni", dni);
-  entry.set("numero", numero);
-  entry.set("accion", accion);
-  entry.set("fecha", new Date());
-
-  if (empresa && typeof empresa.get === "function") {
-    entry.set("empresa", empresa);
-  }
-
-  if (Number.isFinite(latitud) && Number.isFinite(longitud)) {
-    entry.set(
-      "ubicacion",
-      new Parse.GeoPoint({
-        latitude: latitud,
-        longitude: longitud
-      })
-    );
-  }
-
-  try {
-    await entry.save();
-    console.log("✔ Fichaje guardado en TimeEntries (Back4App)");
-  } catch (e) {
-    console.error("❌ Error guardando fichaje:", e);
-  }
-}
 
 // ===============================
 //   RECORDATORIOS DE FICHAJE
@@ -407,12 +362,16 @@ async function empleadoYaHaFichadoHoy(empleado, accion) {
 }
 
 async function enviarRecordatorioFichaje(accion) {
+  // Bloqueo adicional: nunca enviar recordatorios automáticos a empleados.
+  console.log("🔕 Recordatorios de fichaje desactivados:", accion);
+  return;
   try {
     if (!sockWA || estadoWA !== "conectado") {
       console.log("⚠️ WhatsApp no está conectado. No se envían recordatorios.");
       return;
     }
 
+    if (!esDiaLaborableConfigurado()) return;
     console.log(`⏰ Revisando recordatorios de ${accion}...`);
 
     const empleados = await obtenerEmpleadosActivos();
@@ -457,27 +416,22 @@ function iniciarRecordatorios() {
 
   recordatoriosIniciados = true;
 
-  cron.schedule(
-    "5 8 * * 1-5",
-    async () => {
-      await enviarRecordatorioFichaje("ENTRADA");
-    },
-    {
-      timezone: "Europe/Madrid"
-    }
-  );
+  // Recordatorios individuales de ENTRADA/SALIDA DESACTIVADOS por administración.
+  // No programar tareas de recordatorio para empleados.
 
-  cron.schedule(
-    "5 15 * * 1-5",
-    async () => {
-      await enviarRecordatorioFichaje("SALIDA");
-    },
-    {
-      timezone: "Europe/Madrid"
+  cron.schedule("5 15 * * 1-5", async () => {
+    if (sockWA && estadoWA === "conectado") {
+      try {
+        // Incluir los últimos horarios provisionales (hasta +5 minutos) en el resumen.
+        await crearMarcajesProgramados();
+        await enviarResumenDiario(sockWA);
+      } catch (e) {
+        console.error("Error enviando resumen administrativo:", e);
+      }
     }
-  );
+  }, { timezone: "Europe/Madrid" });
 
-  console.log("⏰ Recordatorios programados: 08:05 ENTRADA y 15:05 SALIDA.");
+  console.log("🔕 Recordatorios de empleados DESACTIVADOS. Resumen administrativo programado.");
 }
 
 // ===============================
@@ -590,6 +544,32 @@ async function iniciarBot() {
         console.log("✅ Conectado a WhatsApp");
 
         iniciarRecordatorios();
+        // Si vuelve la conexión entre 15:30 y 15:59, entrega el menú pendiente.
+        void enviarMenuDiarioProgramado({ sock, conectado: true })
+          .catch(error => console.error("❌ No se pudo reintentar el menú de administración al reconectar:", error?.message || error));
+        // Verificación real de lectura de Back4App y prueba de envío al número administrador.
+        // Se ejecuta una única vez por arranque para evitar notificaciones duplicadas.
+        if (!comprobacionArranqueRealizada) {
+          comprobacionArranqueRealizada = true;
+          promesaMapaLIDs = (async () => {
+            try {
+              const consulta = new Parse.Query("Employees");
+              consulta.equalTo("activo", true);
+              consulta.limit(1000);
+              const empleados = await consulta.find();
+              await new Parse.Query("TimeEntries").limit(1).find();
+              console.log("✅ Back4App: lectura de Employees y TimeEntries correcta");
+              const numeros = [
+                process.env.ADMIN_WHATSAPP,
+                ...empleados.flatMap(e => [e.get("telefono"), e.get("waId")])
+              ];
+              mapaLIDaTelefono = await construirMapaLIDs(sock, numeros);
+              console.log("✅ Correspondencias LID verificadas por WhatsApp:", mapaLIDaTelefono.size);
+            } catch (error) {
+              console.error("❌ Falló la comprobación de identidad y base de datos:", error?.message || error);
+            }
+          })();
+        }
       }
     });
 
@@ -602,13 +582,15 @@ async function iniciarBot() {
       }
     });
 
-    sock.ev.on("messages.upsert", async ({ messages }) => {
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+      if (type && type !== "notify") return; // No responder al historial sincronizado.
       try {
         for (const msg of messages) {
           if (!msg?.message || msg.key?.fromMe) continue;
 
           const rawJid = msg.key.remoteJid || "";
           const rawParticipant = msg.key.participant || "";
+          if (!rawJid.endsWith("@s.whatsapp.net") && !rawJid.endsWith("@lid")) continue;
           const messageId = `${rawJid}:${rawParticipant}:${msg.key.id}`;
 
           if (mensajesProcesados.has(messageId)) {
@@ -624,119 +606,54 @@ async function iniciarBot() {
 
           console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
-          const baseId = rawParticipant || rawJid;
-          const numero = normalizarNumero(baseId.split("@")[0]);
+          const textoOriginal = obtenerTexto(msg).trim().toUpperCase();
+          const texto = interpretarSeleccionAdmin(msg.message) ||
+            interpretarNumeroAdmin(textoOriginal) || textoOriginal;
+          // No inspeccionar ni guardar coordenadas: el fichaje funciona en teletrabajo.
+          // Las ubicaciones enviadas por error, sin texto, se ignoran.
+          if (!texto) continue;
 
-          console.log("📞 Identificador normalizado:", numero);
-
-          const mensajeReal = obtenerMensajeReal(msg.message);
-          console.log("🧪 Tipo de mensaje recibido:", Object.keys(mensajeReal || {}));
-
-          const texto = obtenerTexto(msg).trim().toUpperCase();
-          const ubicacionRecibida = obtenerUbicacion(msg);
-
-          console.log(`📩 Mensaje de ${numero}: ${texto}`);
-
-          if (ubicacionRecibida) {
-            console.log(
-              "📍 Ubicación detectada:",
-              ubicacionRecibida.tipo,
-              ubicacionRecibida.latitud,
-              ubicacionRecibida.longitud
-            );
+          // WhatsApp puede entregar chats particulares usando LID en vez del teléfono.
+          // Solo asociar el mensaje a un empleado/admin cuando hay un número verificable.
+          let jidTelefono = rawJid;
+          if (rawJid.endsWith("@lid")) {
+            jidTelefono = msg.key.remoteJidAlt?.endsWith("@s.whatsapp.net")
+              ? msg.key.remoteJidAlt
+              : await sock.signalRepository?.lidMapping?.getPNForLID?.(rawJid);
           }
-
-          // ===============================
-          //   SI ESTÁ ESPERANDO UBICACIÓN
-          // ===============================
-          if (esperandoUbicacion.has(numero) && ubicacionRecibida) {
-            const { accion, empleado } = esperandoUbicacion.get(numero);
-            esperandoUbicacion.delete(numero);
-
-            const nombre = empleado.get("nombre") || "-";
-            const dni = empleado.get("dni") || "-";
-            const empresa = empleado.get("empresa");
-
-            const latitud = ubicacionRecibida.latitud;
-            const longitud = ubicacionRecibida.longitud;
-
-            if (!Number.isFinite(latitud) || !Number.isFinite(longitud)) {
-              await sock.sendMessage(msg.key.remoteJid, {
-                text:
-                  "⚠️ No he podido leer correctamente tu ubicación.\n\n" +
-                  "Por favor envíala de nuevo desde el clip 📎 → Ubicación → Ubicación actual."
-              });
-              return;
+          // Algunos mensajes omiten el PN alternativo aunque Baileys conozca el LID del admin.
+          // Comprobar la asociación inversa sin asumir jamás que un LID desconocido es el admin.
+          if (!jidTelefono?.endsWith("@s.whatsapp.net") && rawJid.endsWith("@lid") && process.env.ADMIN_WHATSAPP) {
+            const adminNumero = normalizarNumero(process.env.ADMIN_WHATSAPP);
+            const adminPN = `${adminNumero.length === 9 ? "34" + adminNumero : adminNumero}@s.whatsapp.net`;
+            try {
+              const adminLID = await sock.signalRepository?.lidMapping?.getLIDForPN?.(adminPN);
+              if (adminLID && adminLID.split("@")[0] === rawJid.split("@")[0]) jidTelefono = adminPN;
+            } catch (error) {
+              console.warn("⚠️ No se pudo consultar la correspondencia LID del administrador:", error?.message || error);
             }
-
-            console.log(
-              `📍 Ubicación recibida de ${nombre} (${numero}): lat=${latitud}, lon=${longitud}`
-            );
-
-            const puntoFichaje = new Parse.GeoPoint({
-              latitude: latitud,
-              longitude: longitud
-            });
-
-            const ubicacionEmpresa = empresa?.get("ubicacion");
-
-            if (ubicacionEmpresa instanceof Parse.GeoPoint) {
-              const distanciaKm = ubicacionEmpresa.kilometersTo(puntoFichaje);
-              const distanciaMetros = distanciaKm * 1000;
-
-              console.log(
-                `📏 Distancia al centro de trabajo: ${distanciaMetros.toFixed(2)} m`
-              );
-
-              if (distanciaMetros > 40) {
-                await sock.sendMessage(msg.key.remoteJid, {
-                  text:
-                    "🐦 Hay pájar@, no estás en la oficina 🤣.\n" +
-                    "Para fichar debes estar en la oficina 🔫😉"
-                });
-                return;
-              }
-            } else {
-              console.log(
-                "⚠️ La empresa no tiene 'ubicacion' GeoPoint configurada. Se admite fichaje igualmente."
-              );
-            }
-
-            const telefonoBD = empleado.get("telefono");
-            const waIdBD = empleado.get("waId");
-
-            const numeroParaRegistro = telefonoBD
-              ? normalizarNumero(telefonoBD)
-              : waIdBD
-                ? normalizarNumero(waIdBD)
-                : numero;
-
-            await guardarFichajeEnBack4app({
-              nombre,
-              dni,
-              numero: numeroParaRegistro,
-              empresa,
-              accion,
-              latitud,
-              longitud
-            });
-
-            await sock.sendMessage(msg.key.remoteJid, {
-              text: `✅ ${accion} registrada con ubicación.\nGracias, ${nombre}.`
-            });
-
-            return;
           }
-
-          if (esperandoUbicacion.has(numero) && !ubicacionRecibida) {
-            await sock.sendMessage(msg.key.remoteJid, {
-              text:
-                "⚠️ Estaba esperando tu ubicación.\n\n" +
-                "Por favor envíala desde el clip 📎 o botón + → Ubicación → Ubicación actual.\n\n" +
-                "No envíes ubicación en tiempo real."
-            });
-            return;
+          if (!jidTelefono?.endsWith("@s.whatsapp.net") && rawJid.endsWith("@lid")) {
+            if (promesaMapaLIDs) await promesaMapaLIDs;
+            jidTelefono = mapaLIDaTelefono.get(rawJid) || jidTelefono;
           }
+          if (!jidTelefono?.endsWith("@s.whatsapp.net")) {
+            console.warn("⚠️ Mensaje desde LID sin correspondencia de teléfono: no se registra ningún fichaje.");
+            await sock.sendMessage(rawJid, {
+              text: "⚠️ No puedo verificar tu número de WhatsApp para fichar. Contacta con administración."
+            });
+            continue;
+          }
+          const numero = normalizarNumero(jidTelefono.split("@")[0]);
+
+          console.log("📩 Mensaje recibido:", texto);
+
+          // Los comandos administrativos solo se aceptan en chats individuales.
+          if (await procesarComandoAdmin({
+            texto, numero,
+            responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta }),
+            enviarMenu: async () => enviarMenuAdmin(sock, msg.key.remoteJid)
+          })) continue;
 
           // ===============================
           //   ENTRADA / SALIDA
@@ -756,7 +673,7 @@ async function iniciarBot() {
                   "Para atención al cliente, puedes llamarnos o ver las distintas formas de contacto en:\n" +
                   "https://laprimera.net/"
               });
-              return;
+              continue;
             }
 
             if (
@@ -768,22 +685,21 @@ async function iniciarBot() {
                   "⚠️ Tu usuario no está habilitado para fichar.\n" +
                   "Si crees que es un error, contacta con administración."
               });
-              return;
+              continue;
             }
 
             const nombre = empleado.get("nombre") || "-";
-
-            esperandoUbicacion.set(numero, { accion, empleado });
-
+            const registro = await registrarFichajeWhatsApp({ empleado, accion, numero });
+            const hora = new Intl.DateTimeFormat("es-ES", {
+              timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+            }).format(registro.fecha);
             await sock.sendMessage(msg.key.remoteJid, {
-              text:
-                `Hola, ${nombre}.\n\n` +
-                `Para registrar tu *${accion}*, envíame ahora tu ubicación actual.\n\n` +
-                `En iPhone: pulsa el botón + o el clip 📎 → Ubicación → *Enviar ubicación actual*.\n\n` +
-                `No envíes ubicación en tiempo real.`
+              text: registro.creada
+                ? `✅ ${accion} guardada en Back4App a las *${hora}*. Gracias, ${nombre}. No necesitas enviar ubicación, también si teletrabajas.`
+                : `ℹ️ Ya tenías una ${accion} comunicada por WhatsApp hoy, a las *${hora}*. No he creado un duplicado.`
             });
 
-            return;
+            continue;
           }
 
           // ===============================
@@ -793,7 +709,7 @@ async function iniciarBot() {
             text: mensajeNoAtencionCliente
           });
 
-          return;
+          continue;
         }
       } catch (error) {
         console.error("❌ Error procesando mensaje:", error);
@@ -806,4 +722,97 @@ async function iniciarBot() {
   }
 }
 
+let generandoPlanificacion = false;
+async function asegurarPlanificacionDiaria() {
+  if (generandoPlanificacion) return;
+  generandoPlanificacion = true;
+  try {
+    await registrarJornadasPrevistas();
+  } catch (error) {
+    console.error("❌ Fallo al registrar jornadas previstas:", error?.message || error);
+  } finally {
+    generandoPlanificacion = false;
+  }
+}
+
+// Se ejecuta aun sin WhatsApp vinculado: registrar turnos no depende de los mensajes.
+// Reintentos idempotentes durante la mañana por si Back4App está indisponible a las 08:00.
+cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
+  timezone: "Europe/Madrid"
+});
+// Horarios provisionales distribuidos entre 07:55–08:05 y 15:00–15:05.
+ // Se comprueba cada minuto, sin recordatorios, incluso si WhatsApp no está conectado.
+let promesaAutomaticos = null;
+async function crearMarcajesProgramados() {
+  if (promesaAutomaticos) return promesaAutomaticos;
+  const tarea = (async () => {
+    try {
+      await registrarFichajesAutomaticos();
+    } catch (error) {
+      console.error("❌ No se pudieron registrar los marcajes automáticos:", error?.message || error);
+    }
+  })();
+  promesaAutomaticos = tarea;
+  try {
+    await tarea;
+  } finally {
+    if (promesaAutomaticos === tarea) promesaAutomaticos = null;
+  }
+}
+cron.schedule("* * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
+
+// Envío automático TODOS los días a las 15:30 (Madrid).
+// Reintenta hasta las 15:59 si WhatsApp no estaba conectado, y no repite una fecha enviada.
+cron.schedule(CRON_MENU_DIARIO, async () => {
+  try {
+    const resultado = await enviarMenuDiarioProgramado({
+      sock: sockWA,
+      conectado: estadoWA === "conectado"
+    });
+    if (resultado.estado === "whatsapp_desconectado" &&
+        new Intl.DateTimeFormat("en-GB", { timeZone: ZONA_MENU_DIARIO,
+          hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date()) === "15:30") {
+      console.warn("⚠️ Menú de las 15:30 pendiente: WhatsApp desconectado; se reintentará durante esta media hora.");
+    }
+  } catch (error) {
+    console.error("❌ Error en el envío del menú diario 15:30:", error?.message || error);
+  }
+}, { timezone: ZONA_MENU_DIARIO });
+void crearMarcajesProgramados(); // Reanuda las marcas vencidas sin duplicarlas.
+
+void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
+void auditarHistoria()
+  .then(inventario => console.log("🗓️ INVENTARIO HISTÓRICO BACK4APP:", JSON.stringify(inventario)))
+  .catch(error => console.error("❌ AUDITORÍA HISTÓRICA:", error?.message || error));
+const modoHistorico = process.env.RECONSTRUCCION_HISTORICA_SEP_OCT_2026 === "APLICAR";
+void reconstruirHistorico({ aplicar: modoHistorico })
+  .then(resultado => console.log("📚 RECONSTRUCCIÓN HISTÓRICA:", JSON.stringify(resultado)))
+  .catch(error => console.error("❌ RECONSTRUCCIÓN HISTÓRICA:", error?.message || error));
+
+// Operación puntual de mantenimiento: SIMULAR o APLICAR solo para las 4 marcas
+// automáticas del 30/10/2026; nunca se modifican marcas de asistencia real.
+if (["SIMULAR", "APLICAR"].includes(process.env.AJUSTE_ENTRADAS_AUTO_30OCT2026)) {
+  const aplicar = process.env.AJUSTE_ENTRADAS_AUTO_30OCT2026 === "APLICAR";
+  void ajustarEntradasProvisionales30Oct({ aplicar })
+    .then(resultado => console.log("🔎 AJUSTE ENTRADAS PROVISIONALES 30OCT:", JSON.stringify(resultado)))
+    .catch(error => console.error("❌ AJUSTE ENTRADAS PROVISIONALES 30OCT:", error?.message || error));
+}
+
+// Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
+void comprobarRegistrosBack4App()
+  .then(resultado => console.log("✅ VERIFICACIÓN REAL BACK4APP:", JSON.stringify(resultado)))
+  .catch(error => console.error("❌ VERIFICACIÓN REAL BACK4APP:", error?.message || error));
+
+// Una ejecución controlada solicitada explícitamente por administración para la fecha indicada.
+// No convierte horarios previstos en fichajes GPS; solo crea confirmaciones auditadas.
+if (process.env.CONFIRMACION_ADMIN_UNICA_FECHA === fechaLocal() && process.env.ADMIN_WHATSAPP) {
+  void procesarComandoAdmin({
+    texto: "CONFIRMAR TODOS",
+    numero: process.env.ADMIN_WHATSAPP,
+    canalConfirmacion: "solicitud_explicita_administracion",
+    responder: async resultado => {
+      console.log("📋 Confirmación administrativa solicitada para el día:", resultado);
+    }
+  }).catch(error => console.error("❌ Confirmación administrativa de arranque:", error));
+}
 iniciarBot();
