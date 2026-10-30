@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fechaHoraMadrid, registrarFichajesAutomaticos, ORIGEN_AUTOMATICO } from "../fichajes-automaticos.js";
+import { fechaHoraMadrid, registrarFichajesAutomaticos, ORIGEN_AUTOMATICO, variacionMinutos } from "../fichajes-automaticos.js";
 import { prepararConfirmacion } from "../jornadas-admin.js";
 
 const empleados = Array.from({ length: 6 }, (_, i) => ({
@@ -67,7 +67,7 @@ test("Crea 6 entradas a las 08, 6 salidas a las 15 y no duplica al reintentar", 
     assert.equal(filas.length, 6);
     for (const registro of filas) {
       assert.equal(registro.get("origen"), ORIGEN_AUTOMATICO);
-      assert.equal(registro.get("fecha").toISOString(), "2026-10-30T07:00:00.000Z");
+      assert.ok(Math.abs(registro.get("fecha").getTime() - fechaHoraMadrid(fecha, "08:00").getTime()) <= 300000);
       assert.equal(registro.get("estado"), "AUTOMATICO_PENDIENTE_VERIFICACION");
       assert.equal(registro.get("provisional"), true);
       assert.equal(registro.get("ubicacion"), undefined);
@@ -78,7 +78,7 @@ test("Crea 6 entradas a las 08, 6 salidas a las 15 y no duplica al reintentar", 
     assert.equal(repetido.entradasNuevas, 0);
     assert.equal(filas.length, 6);
     const tarde = await registrarFichajesAutomaticos({
-      fecha, ahora: new Date("2026-10-30T14:01:00Z"), cliente
+      fecha, ahora: new Date("2026-10-30T14:05:00Z"), cliente
     });
     assert.equal(tarde.salidasNuevas, 6);
     assert.equal(filas.length, 12);
