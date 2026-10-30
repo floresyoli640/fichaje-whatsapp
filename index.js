@@ -28,6 +28,7 @@ import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { registrarFichajeWhatsApp } from "./fichaje-manual.js";
+import { enviarMenuAdmin, interpretarSeleccionAdmin, interpretarNumeroAdmin } from "./menu-admin.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { auditarHistoria } from "./auditoria-historica.js";
 import { reconstruirHistorico } from "./reconstruccion-historica.js";
@@ -601,7 +602,9 @@ async function iniciarBot() {
 
           console.log("🔍 JIDs -> remoteJid:", rawJid, "| participant:", rawParticipant);
 
-          const texto = obtenerTexto(msg).trim().toUpperCase();
+          const textoOriginal = obtenerTexto(msg).trim().toUpperCase();
+          const texto = interpretarSeleccionAdmin(msg.message) ||
+            interpretarNumeroAdmin(textoOriginal) || textoOriginal;
           // No inspeccionar ni guardar coordenadas: el fichaje funciona en teletrabajo.
           // Las ubicaciones enviadas por error, sin texto, se ignoran.
           if (!texto) continue;
@@ -644,7 +647,8 @@ async function iniciarBot() {
           // Los comandos administrativos solo se aceptan en chats individuales.
           if (await procesarComandoAdmin({
             texto, numero,
-            responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta })
+            responder: async (respuesta) => sock.sendMessage(msg.key.remoteJid, { text: respuesta }),
+            enviarMenu: async () => enviarMenuAdmin(sock, msg.key.remoteJid)
           })) continue;
 
           // ===============================
