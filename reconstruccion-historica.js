@@ -172,12 +172,8 @@ export async function reconstruirHistorico({
         registro.set("provisional", true);
         registro.set("pendienteVerificacion", true);
         registro.set("sinGPS", true);
-        registro.set("horaProgramada", candidato.accion === "ENTRADA" ? HORARIO.entrada : HORARIO.salida);
-        registro.set("variacionAleatoriaMinutos", candidato.variacion);
         registro.set("registradoEn", new Date());
-        registro.set("margenAleatorioMinutos", 5);
-        registro.set("horaReferenciaSinVerificar", true);
-        registro.set("observacion", "REGISTRO RETROSPECTIVO de horario teórico: NO acredita presencia, horas trabajadas ni fichaje GPS.");
+        registro.set("observacion", `RECONSTRUCCIÓN RETROSPECTIVA del horario teórico ${candidato.accion === "ENTRADA" ? HORARIO.entrada : HORARIO.salida} (variación ${candidato.variacion} min). Creado posteriormente: NO acredita presencia, horas trabajadas ni GPS.`);
         await registro.save();
         // Evitar duplicados durante esta ejecución y conservar los anteriores.
         marcas.push(registro);
