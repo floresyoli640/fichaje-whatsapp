@@ -8,9 +8,9 @@ import {
 
 const JID = "34600000000@s.whatsapp.net";
 
-test("Hay exactamente tres botones y solo remiten a comandos administrativos permitidos", () => {
+test("Hay cuatro acciones repartidas en bloques de máximo tres botones", () => {
   assert.deepEqual(OPCIONES_ADMIN.map(x => x.comando),
-    ["RESUMEN", "CONFIRMAR TODOS", "DETALLE"]);
+    ["RESUMEN", "CONFIRMAR TODOS", "DETALLE", "VERIFICAR BD"]);
   assert.equal(new Set(OPCIONES_ADMIN.map(x => x.id)).size, 3);
   const msg = construirMensajeBotonesAdmin();
   const interactivo = msg.viewOnceMessage.message.interactiveMessage;
@@ -23,6 +23,12 @@ test("Hay exactamente tres botones y solo remiten a comandos administrativos per
     assert.ok(args.display_text.length <= 20);
   }
   assert.equal(msg.viewOnceMessage.message.messageContextInfo.deviceListMetadataVersion, 2);
+  const cuarto = construirMensajeBotonesAdmin(OPCIONES_ADMIN.slice(3));
+  const cuartoBoton = cuarto.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons;
+  assert.equal(cuartoBoton.length, 1);
+  assert.deepEqual(JSON.parse(cuartoBoton[0].buttonParamsJson),
+    { display_text: OPCIONES_ADMIN[3].etiqueta, id: OPCIONES_ADMIN[3].id });
+  assert.throws(() => construirMensajeBotonesAdmin(OPCIONES_ADMIN), /tres botones/);
   assert.ok(nodosBotonesAdmin().some(n => n.tag === "biz"));
   assert.ok(nodosBotonesAdmin().some(n => n.tag === "bot"));
 });
@@ -53,6 +59,10 @@ test("Reconoce respuestas desde botones iOS, Android, list, template y native_fl
     buttonsResponseMessage: { selectedButtonId: "accion_no_autorizada" }
   }), null);
   assert.equal(interpretarNumeroAdmin(" 2 "), "CONFIRMAR TODOS");
+  assert.equal(interpretarNumeroAdmin("4"), "VERIFICAR BD");
+  assert.equal(interpretarSeleccionAdmin({
+    buttonsResponseMessage: { selectedButtonId: "adm_verificar" }
+  }), "VERIFICAR BD");
   assert.equal(interpretarNumeroAdmin("7"), null);
 });
 
@@ -73,6 +83,11 @@ test("Envía primero texto utilizable, después botones, y conserva el fallback 
   assert.equal(orden[1].tipo, "botones");
   assert.equal(orden[1].jid, JID);
   assert.equal(orden[1].options.additionalNodes.length, 2);
+  assert.equal(orden[2].tipo, "botones");
+  assert.equal(orden[2].jid, JID);
+  assert.equal(orden.filter(e => e.tipo === "botones").length, 2);
+  assert.equal(orden[1].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 3);
+  assert.equal(orden[2].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 1);
   assert.match(orden[0].payload.text, /CONFIRMAR TODOS/);
   assert.equal(orden[0].payload.text, TEXTO_MENU_ADMIN);
 
