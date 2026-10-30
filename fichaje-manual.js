@@ -44,8 +44,8 @@ export async function registrarFichajeWhatsApp({
 
   const anterior = registros.find(r => {
     const fechaMarca = r.get("fecha");
-    return fechaMarca instanceof Date && fechaLocal(fechaMarca) === fecha &&
-      mismoEmpleado(r, empleado, numeros) && marcaManual(r);
+    return r.get("accion") === accion && fechaMarca instanceof Date &&
+      fechaLocal(fechaMarca) === fecha && mismoEmpleado(r, empleado, numeros) && marcaManual(r);
   });
   if (anterior) {
     return { creada: false, fecha: anterior.get("fecha"), id: anterior.id || null };
