@@ -157,3 +157,36 @@ test("Nunca registra un horario programado antes del minuto asignado", async () 
     assert.equal(total.salidasNuevas, 0);
   });
 });
+
+test("NINGUNA salida automática tiene hora anterior a las 15:00, ni entre 14:55 y 14:59", async () => {
+  await conFestivos("2026-11-02,2026-12-07", async () => {
+    const fecha = "2026-10-30";
+    const horaMinima = fechaHoraMadrid(fecha, "15:00");
+    const horaMaxima = fechaHoraMadrid(fecha, "15:05");
+    // Los seis trabajadores tienen una variación estable de 0 a +5 minutos.
+    for (const empleado of empleados) {
+      const offset = variacionMinutos(empleado.id, fecha, "SALIDA");
+      assert.ok(offset >= 0 && offset <= 5, `Salida anterior a las 15:00 para ${empleado.id}`);
+      assert.equal(offset, variacionMinutos(empleado.id, fecha, "SALIDA"));
+    }
+    const { cliente, filas } = back4appFalso();
+    const antesDeLas15 = await registrarFichajesAutomaticos({
+      fecha, ahora: new Date("2026-10-30T13:59:59Z"), cliente
+    });
+    assert.equal(antesDeLas15.salidasNuevas, 0);
+    assert.equal(filas.filter(r => r.get("accion") === "SALIDA").length, 0);
+    const despuesDeLas15 = await registrarFichajesAutomaticos({
+      fecha, ahora: horaMaxima, cliente
+    });
+    assert.equal(despuesDeLas15.salidasNuevas, 6);
+    const salidas = filas.filter(r => r.get("accion") === "SALIDA");
+    assert.equal(salidas.length, 6);
+    for (const salida of salidas) {
+      assert.ok(salida.get("fecha") >= horaMinima);
+      assert.ok(salida.get("fecha") <= horaMaxima);
+      assert.equal(salida.get("horaProgramada"), "15:00");
+      assert.ok(salida.get("variacionAleatoriaMinutos") >= 0);
+      assert.equal(salida.get("provisional"), true);
+    }
+  });
+});
