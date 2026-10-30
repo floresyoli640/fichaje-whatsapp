@@ -1,11 +1,12 @@
-// Menú interactivo de administración: tres botones con alternativa de texto.
+// Menú interactivo de administración: 4 acciones en bloques de hasta 3 botones.
 // Baileys utiliza WhatsApp Web (no la API oficial); el cliente puede no mostrar botones.
 import { generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 
 export const OPCIONES_ADMIN = Object.freeze([
   { id: "adm_resumen", comando: "RESUMEN", etiqueta: "📋 Resumen" },
   { id: "adm_confirmar", comando: "CONFIRMAR TODOS", etiqueta: "✅ Confirmar todos" },
-  { id: "adm_detalle", comando: "DETALLE", etiqueta: "📄 Detalle" }
+  { id: "adm_detalle", comando: "DETALLE", etiqueta: "📄 Detalle" },
+  { id: "adm_verificar", comando: "VERIFICAR BD", etiqueta: "🔎 Verificar BD" }
 ]);
 
 export const TEXTO_MENU_ADMIN = [
@@ -13,8 +14,9 @@ export const TEXTO_MENU_ADMIN = [
   "1️⃣ RESUMEN — cifras del día",
   "2️⃣ CONFIRMAR TODOS — aprobar jornadas",
   "3️⃣ DETALLE — horarios por trabajador",
+  "4️⃣ VERIFICAR BD — comprobar registros guardados",
   "",
-  "Pulsa un botón o responde con 1, 2 o 3.",
+  "Pulsa un botón o responde con 1, 2, 3 o 4.",
   "Si los botones no aparecen, los comandos por escrito siguen funcionando."
 ].join("\n");
 
@@ -50,11 +52,16 @@ export function interpretarSeleccionAdmin(mensaje) {
 
 export function interpretarNumeroAdmin(texto) {
   const normalizado = String(texto || "").trim();
-  const indices = { "1": "RESUMEN", "2": "CONFIRMAR TODOS", "3": "DETALLE" };
+  const indices = { "1": "RESUMEN", "2": "CONFIRMAR TODOS", "3": "DETALLE", "4": "VERIFICAR BD" };
   return indices[normalizado] || null;
 }
 
-export function construirMensajeBotonesAdmin() {
+// Una única burbuja de WhatsApp muestra, como máximo, tres botones rápidos fiables.
+// La cuarta acción se envía como segundo bloque de un botón.
+export function construirMensajeBotonesAdmin(opciones = OPCIONES_ADMIN.slice(0, 3)) {
+  if (!Array.isArray(opciones) || !opciones.length || opciones.length > 3) {
+    throw new Error("Cada mensaje permite entre uno y tres botones rápidos");
+  }
   return {
     viewOnceMessage: {
       message: {
@@ -67,7 +74,7 @@ export function construirMensajeBotonesAdmin() {
           body: { text: "Selecciona una opción de administración:" },
           footer: { text: "Solo administración · Los fichajes automáticos son provisionales" },
           nativeFlowMessage: {
-            buttons: OPCIONES_ADMIN.map(opcion => ({
+            buttons: opciones.map(opcion => ({
               name: "quick_reply",
               buttonParamsJson: JSON.stringify({
                 display_text: opcion.etiqueta,
@@ -109,16 +116,18 @@ export async function enviarMenuAdmin(sock, jid) {
     if (!sock.user?.id || typeof sock.relayMessage !== "function") {
       throw new Error("Baileys no dispone de envío de mensajes interactivos");
     }
-    const generado = generateWAMessageFromContent(
-      jid,
-      construirMensajeBotonesAdmin(),
-      { userJid: sock.user.id }
-    );
-    await sock.relayMessage(jid, generado.message, {
-      messageId: generado.key.id,
-      additionalNodes: nodosBotonesAdmin()
-    });
-    console.log("✅ Menú de tres botones enviado a administración (renderizado dependiente del móvil)");
+    for (let desde = 0; desde < OPCIONES_ADMIN.length; desde += 3) {
+      const generado = generateWAMessageFromContent(
+        jid,
+        construirMensajeBotonesAdmin(OPCIONES_ADMIN.slice(desde, desde + 3)),
+        { userJid: sock.user.id }
+      );
+      await sock.relayMessage(jid, generado.message, {
+        messageId: generado.key.id,
+        additionalNodes: nodosBotonesAdmin()
+      });
+    }
+    console.log("✅ Menú de cuatro acciones enviado a administración en dos bloques (renderizado dependiente del móvil)");
     return { enviado: true, fallbackTexto: true };
   } catch (error) {
     console.warn("⚠️ Botones nativos no disponibles; menú de texto enviado:", error?.message || error);
