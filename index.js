@@ -28,6 +28,7 @@ import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
+import { auditarHistoria } from "./auditoria-historica.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -921,6 +922,10 @@ cron.schedule("* * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madri
 void crearMarcajesProgramados(); // Reanuda las marcas vencidas sin duplicarlas.
 
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
+void auditarHistoria()
+  .then(inventario => console.log("🗓️ INVENTARIO HISTÓRICO BACK4APP:", JSON.stringify(inventario)))
+  .catch(error => console.error("❌ AUDITORÍA HISTÓRICA:", error?.message || error));
+
 // Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
 void comprobarRegistrosBack4App()
   .then(resultado => console.log("✅ VERIFICACIÓN REAL BACK4APP:", JSON.stringify(resultado)))
