@@ -48,8 +48,10 @@ export function prepararConfirmacion({ marcas = {}, correccion = null, horario =
   const convertirHora = fecha => new Intl.DateTimeFormat("es-ES", {
     timeZone: ZONA, hour: "2-digit", minute: "2-digit", hourCycle: "h23"
   }).format(fecha);
-  const entradaReal = marcas.entrada instanceof Date ? convertirHora(marcas.entrada) : null;
-  const salidaReal = marcas.salida instanceof Date ? convertirHora(marcas.salida) : null;
+  const entradaReal = marcas.entrada instanceof Date && !marcas.entradaAutomatica
+    ? convertirHora(marcas.entrada) : null;
+  const salidaReal = marcas.salida instanceof Date && !marcas.salidaAutomatica
+    ? convertirHora(marcas.salida) : null;
 
   const entrada = entradaCorregida || entradaReal || horario.entrada;
   const salida = salidaCorregida || salidaReal || horario.salida;
