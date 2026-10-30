@@ -419,6 +419,9 @@ async function empleadoYaHaFichadoHoy(empleado, accion) {
 }
 
 async function enviarRecordatorioFichaje(accion) {
+  // Bloqueo adicional: nunca enviar recordatorios automáticos a empleados.
+  console.log("🔕 Recordatorios de fichaje desactivados:", accion);
+  return;
   try {
     if (!sockWA || estadoWA !== "conectado") {
       console.log("⚠️ WhatsApp no está conectado. No se envían recordatorios.");
@@ -470,25 +473,8 @@ function iniciarRecordatorios() {
 
   recordatoriosIniciados = true;
 
-  cron.schedule(
-    "5 8 * * 1-5",
-    async () => {
-      await enviarRecordatorioFichaje("ENTRADA");
-    },
-    {
-      timezone: "Europe/Madrid"
-    }
-  );
-
-  cron.schedule(
-    "5 15 * * 1-5",
-    async () => {
-      await enviarRecordatorioFichaje("SALIDA");
-    },
-    {
-      timezone: "Europe/Madrid"
-    }
-  );
+  // Recordatorios individuales de ENTRADA/SALIDA DESACTIVADOS por administración.
+  // No programar tareas de recordatorio para empleados.
 
   cron.schedule("5 15 * * 1-5", async () => {
     if (sockWA && estadoWA === "conectado") {
@@ -497,7 +483,7 @@ function iniciarRecordatorios() {
     }
   }, { timezone: "Europe/Madrid" });
 
-  console.log("⏰ Recordatorios y resumen administrativo programados.");
+  console.log("🔕 Recordatorios de empleados DESACTIVADOS. Resumen administrativo programado.");
 }
 
 // ===============================
