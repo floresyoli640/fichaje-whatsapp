@@ -99,7 +99,7 @@ async function resumen(fecha, empleados, faltas) {
     };
     return `• ${p.nombre}: ${mostrarMarca(marcas.entrada, marcas.entradaAutomatica, "ENTRADA")} / ${mostrarMarca(marcas.salida, marcas.salidaAutomatica, "SALIDA")}${estado}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: VERIFICAR BD | AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
+  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\nOrden HABITUAL de referencia: María de la O Enriqueta primero; Yolanda normalmente después (no prueba la llegada real).\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: VERIFICAR BD | AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
 }
 export async function procesarComandoAdmin({ texto, numero, responder, canalConfirmacion = "whatsapp" }) {
   const comando = texto.trim();
