@@ -157,7 +157,7 @@ export async function reconstruirHistorico({
       for (const candidato of plan.candidatos) {
         const empleado = candidato.empleado;
         const registro = new (cliente.Object.extend("TimeEntries"))();
-        registro.set("claveReconstruccion", candidato.clave);
+        registro.set("claveAutomatica", candidato.clave);
         registro.set("empleadoId", empleado.id);
         registro.set("nombre", empleado.get("nombre") || "Sin nombre");
         if (empleado.get("dni")) registro.set("dni", empleado.get("dni"));
@@ -174,7 +174,9 @@ export async function reconstruirHistorico({
         registro.set("sinGPS", true);
         registro.set("horaProgramada", candidato.accion === "ENTRADA" ? HORARIO.entrada : HORARIO.salida);
         registro.set("variacionAleatoriaMinutos", candidato.variacion);
-        registro.set("reconstruidoEn", new Date());
+        registro.set("registradoEn", new Date());
+        registro.set("margenAleatorioMinutos", 5);
+        registro.set("horaReferenciaSinVerificar", true);
         registro.set("observacion", "REGISTRO RETROSPECTIVO de horario teórico: NO acredita presencia, horas trabajadas ni fichaje GPS.");
         await registro.save();
         // Evitar duplicados durante esta ejecución y conservar los anteriores.
