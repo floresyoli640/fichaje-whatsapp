@@ -25,6 +25,10 @@ export async function comprobarRegistrosBack4App(fecha = fechaLocal(), cliente =
   const marcas = marcasBrutas.filter(m =>
     m.get("fecha") instanceof Date && fechaLocal(m.get("fecha")) === fecha
   );
+  const automaticas = marcas.filter(r =>
+    r.get("origen") === "horario_programado_sin_verificar" || r.get("provisional") === true
+  );
+  const reales = marcas.filter(r => !automaticas.includes(r));
   const unicos = new Set(confirmaciones.map(c => c.get("empleadoId")).filter(Boolean));
   const estados = confirmaciones.reduce((acumulado, registro) => {
     const estado = registro.get("estado") || "SIN_ESTADO";
@@ -42,10 +46,14 @@ export async function comprobarRegistrosBack4App(fecha = fechaLocal(), cliente =
     empleadosConConfirmacion: unicos.size,
     estadosConfirmacion: estados,
     fichajesReales: {
-      entradas: marcas.filter(m => m.get("accion") === "ENTRADA").length,
-      salidas: marcas.filter(m => m.get("accion") === "SALIDA").length
+      entradas: reales.filter(m => m.get("accion") === "ENTRADA").length,
+      salidas: reales.filter(m => m.get("accion") === "SALIDA").length
     },
-    // No representar las confirmaciones pendientes como fichajes realizados.
-    aviso: "Las confirmaciones administrativas y las horas previstas no son marcas GPS."
+    fichajesAutomaticos: {
+      entradas: automaticas.filter(m => m.get("accion") === "ENTRADA").length,
+      salidas: automaticas.filter(m => m.get("accion") === "SALIDA").length
+    },
+    // Un asiento automático representa solo el horario programado, no asistencia comprobada.
+    aviso: "Los marcajes automáticos de TimeEntries son PROVISIONALES y no acreditan presencia ni GPS."
   };
 }
