@@ -26,6 +26,7 @@ import { procesarComandoAdmin, enviarResumenDiario, esDiaLaborableConfigurado } 
 import { construirMapaLIDs } from "./identidad-whatsapp.js";
 import { fechaLocal } from "./jornadas-admin.js";
 import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
+import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 
 // ===============================
@@ -296,6 +297,7 @@ async function buscarEmpleadoPorNumero(numeroRaw) {
 }
 
 async function guardarFichajeEnBack4app({
+  empleadoId,
   nombre,
   dni,
   numero,
@@ -312,6 +314,12 @@ async function guardarFichajeEnBack4app({
   entry.set("numero", numero);
   entry.set("accion", accion);
   entry.set("fecha", new Date());
+  if (empleadoId) entry.set("empleadoId", empleadoId);
+  entry.set("origen", "whatsapp_ubicacion");
+  entry.set("estado", "FICHAJE_REAL");
+  entry.set("provisional", false);
+  entry.set("pendienteVerificacion", false);
+  entry.set("registradoEn", new Date());
 
   if (empresa && typeof empresa.get === "function") {
     entry.set("empresa", empresa);
@@ -770,6 +778,7 @@ async function iniciarBot() {
                 : numero;
 
             await guardarFichajeEnBack4app({
+              empleadoId: empleado.id,
               nombre,
               dni,
               numero: numeroParaRegistro,
@@ -884,6 +893,24 @@ async function asegurarPlanificacionDiaria() {
 cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
   timezone: "Europe/Madrid"
 });
+// Se crean marcajes programados sin verificar al llegar 08:00 y 15:00 (Madrid).
+// Reintentos idempotentes de cinco minutos, incluso aunque WhatsApp esté desconectado.
+// No se envían avisos a trabajadores.
+let procesandoAutomaticos = false;
+async function crearMarcajesProgramados() {
+  if (procesandoAutomaticos) return;
+  procesandoAutomaticos = true;
+  try {
+    await registrarFichajesAutomaticos();
+  } catch (error) {
+    console.error("❌ No se pudieron registrar los marcajes automáticos:", error?.message || error);
+  } finally {
+    procesandoAutomaticos = false;
+  }
+}
+cron.schedule("*/5 * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
+void crearMarcajesProgramados(); // Recupera entradas pendientes al arrancar, nunca adelanta salidas.
+
 void asegurarPlanificacionDiaria(); // También cubre el día actual tras cada despliegue.
 // Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
 void comprobarRegistrosBack4App()
