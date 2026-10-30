@@ -30,6 +30,7 @@ import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { auditarHistoria } from "./auditoria-historica.js";
 import { reconstruirHistorico } from "./reconstruccion-historica.js";
+import { ajustarEntradasProvisionales30Oct } from "./ajuste-entradas-30oct.js";
 
 // ===============================
 //   EXPRESS PARA VER EL QR
@@ -900,7 +901,7 @@ async function asegurarPlanificacionDiaria() {
 cron.schedule("*/15 8-9 * * 1-5", asegurarPlanificacionDiaria, {
   timezone: "Europe/Madrid"
 });
-// Horarios provisionales distribuidos entre 07:55–08:05 y 14:55–15:05.
+// Horarios provisionales distribuidos entre 07:55–08:05 y 15:00–15:05.
  // Se comprueba cada minuto, sin recordatorios, incluso si WhatsApp no está conectado.
 let promesaAutomaticos = null;
 async function crearMarcajesProgramados() {
@@ -930,6 +931,15 @@ const modoHistorico = process.env.RECONSTRUCCION_HISTORICA_SEP_OCT_2026 === "APL
 void reconstruirHistorico({ aplicar: modoHistorico })
   .then(resultado => console.log("📚 RECONSTRUCCIÓN HISTÓRICA:", JSON.stringify(resultado)))
   .catch(error => console.error("❌ RECONSTRUCCIÓN HISTÓRICA:", error?.message || error));
+
+// Operación puntual de mantenimiento: SIMULAR o APLICAR solo para las 4 marcas
+// automáticas del 30/10/2026; nunca se modifican marcas de asistencia real.
+if (["SIMULAR", "APLICAR"].includes(process.env.AJUSTE_ENTRADAS_AUTO_30OCT2026)) {
+  const aplicar = process.env.AJUSTE_ENTRADAS_AUTO_30OCT2026 === "APLICAR";
+  void ajustarEntradasProvisionales30Oct({ aplicar })
+    .then(resultado => console.log("🔎 AJUSTE ENTRADAS PROVISIONALES 30OCT:", JSON.stringify(resultado)))
+    .catch(error => console.error("❌ AJUSTE ENTRADAS PROVISIONALES 30OCT:", error?.message || error));
+}
 
 // Diagnóstico de persistencia leído directamente de Back4App (sin datos personales).
 void comprobarRegistrosBack4App()
