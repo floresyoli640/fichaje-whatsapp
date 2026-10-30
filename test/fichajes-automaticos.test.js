@@ -132,3 +132,28 @@ test("No genera marcajes en festivos ni fines de semana", async () => {
     assert.equal(filas.length, 0);
   });
 });
+
+test("Los seis empleados tienen un desfase estable entre menos cinco y más cinco minutos", () => {
+  const desfases = empleados.map(e => variacionMinutos(e.id, "2026-10-30", "ENTRADA"));
+  for (let i = 0; i < empleados.length; i++) {
+    assert.ok(desfases[i] >= -5 && desfases[i] <= 5);
+    assert.equal(desfases[i], variacionMinutos(empleados[i].id, "2026-10-30", "ENTRADA"));
+  }
+  assert.ok(new Set(desfases).size > 1);
+});
+
+test("Nunca registra un horario programado antes del minuto asignado", async () => {
+  await conFestivos("2026-11-02", async () => {
+    const { cliente, filas } = back4appFalso();
+    const sinHora = await registrarFichajesAutomaticos({
+      fecha: "2026-10-30", ahora: new Date("2026-10-30T06:54:00Z"), cliente
+    });
+    assert.equal(sinHora.entradasNuevas, 0);
+    assert.equal(filas.length, 0);
+    const total = await registrarFichajesAutomaticos({
+      fecha: "2026-10-30", ahora: new Date("2026-10-30T07:05:00Z"), cliente
+    });
+    assert.equal(total.entradasNuevas, 6);
+    assert.equal(total.salidasNuevas, 0);
+  });
+});
