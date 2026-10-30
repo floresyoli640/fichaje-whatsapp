@@ -62,9 +62,20 @@ async function fichajesDelDia(empleado, fecha) {
   q.ascending("fecha");
   q.limit(1000);
   const marcas = (await q.find()).filter(x => x.get("fecha") instanceof Date && fechaLocal(x.get("fecha")) === fecha);
-  const entrada = marcas.find(x => x.get("accion") === "ENTRADA");
-  const salida = [...marcas].reverse().find(x => x.get("accion") === "SALIDA");
-  return { entrada: entrada?.get("fecha"), salida: salida?.get("fecha") };
+  const esAutomatica = x => x.get("origen") === "horario_programado_sin_verificar" || x.get("provisional") === true;
+  const reales = marcas.filter(x => !esAutomatica(x));
+  const programadas = marcas.filter(esAutomatica);
+  // Las marcas reales prevalecen si el trabajador ficha después de generar un horario automático.
+  const entradaReal = reales.find(x => x.get("accion") === "ENTRADA");
+  const salidaReal = [...reales].reverse().find(x => x.get("accion") === "SALIDA");
+  const entradaAuto = programadas.find(x => x.get("accion") === "ENTRADA");
+  const salidaAuto = [...programadas].reverse().find(x => x.get("accion") === "SALIDA");
+  return {
+    entrada: (entradaReal || entradaAuto)?.get("fecha"),
+    salida: (salidaReal || salidaAuto)?.get("fecha"),
+    entradaAutomatica: !entradaReal && Boolean(entradaAuto),
+    salidaAutomatica: !salidaReal && Boolean(salidaAuto)
+  };
 }
 async function resumen(fecha, empleados, faltas) {
   const ids = new Set(faltas.map(a => a.get("empleadoId")));
@@ -82,7 +93,11 @@ async function resumen(fecha, empleados, faltas) {
     const estado = !r ? "" : r.get("estado") === "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION"
       ? " | ✅ registrada por administración (horario previsto, pendiente de verificar)"
       : " | ✅ confirmada por administración (fichajes/corrección)";
-    return `• ${p.nombre}: ${marcas.entrada ? horaLocal(marcas.entrada) : "sin entrada"} / ${marcas.salida ? horaLocal(marcas.salida) : "sin salida"}${estado}`;
+    const mostrarMarca = (fechaMarca, automatica, accion) => {
+      if (!fechaMarca) return accion === "ENTRADA" ? "sin entrada" : "sin salida";
+      return horaLocal(fechaMarca) + (automatica ? " (AUTO, sin verificar)" : " (real)");
+    };
+    return `• ${p.nombre}: ${mostrarMarca(marcas.entrada, marcas.entradaAutomatica, "ENTRADA")} / ${mostrarMarca(marcas.salida, marcas.salidaAutomatica, "SALIDA")}${estado}`;
   }));
   return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: VERIFICAR BD | AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
 }
@@ -107,6 +122,7 @@ export async function procesarComandoAdmin({ texto, numero, responder, canalConf
         `Jornadas previstas: ${estado.tablas.JornadasPrevistas}\n` +
         `Confirmaciones administrativas: ${estado.tablas.ConfirmacionesJornada} (${estado.empleadosConConfirmacion} empleados distintos)\n` +
         `Fichajes reales: ${estado.fichajesReales.entradas} entradas y ${estado.fichajesReales.salidas} salidas\n` +
+        `Marcajes automáticos SIN VERIFICAR: ${estado.fichajesAutomaticos.entradas} entradas y ${estado.fichajesAutomaticos.salidas} salidas\n` +
         `Tabla de confirmaciones: *ConfirmacionesJornada*. Los horarios previstos no son marcas GPS.`
       );
       return true;
