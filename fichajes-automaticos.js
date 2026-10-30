@@ -16,7 +16,11 @@ export function variacionMinutos(empleadoId, fecha, accion) {
   }
   const contenido = `${empleadoId}:${fecha}:${accion}`;
   const valor = createHash("sha256").update(contenido).digest().readUInt32BE(0);
-  return valor % (2 * VARIACION_MAXIMA_MINUTOS + 1) - VARIACION_MAXIMA_MINUTOS;
+  // La ENTRADA puede ser de -5 a +5 minutos; la SALIDA solo de 0 a +5.
+  // Nunca se genera una salida automática anterior a las 15:00.
+  return accion === "SALIDA"
+    ? valor % (VARIACION_MAXIMA_MINUTOS + 1)
+    : valor % (2 * VARIACION_MAXIMA_MINUTOS + 1) - VARIACION_MAXIMA_MINUTOS;
 }
 
 export function esMarcajeAutomatico(registro) {
@@ -69,7 +73,8 @@ export async function registrarFichajesAutomaticos({
   const pendientes = [
     { accion: "ENTRADA", horaBase: HORARIO.entrada, fechaBase: fechaHoraMadrid(fecha, HORARIO.entrada) },
     { accion: "SALIDA", horaBase: HORARIO.salida, fechaBase: fechaHoraMadrid(fecha, HORARIO.salida) }
-  ].filter(m => ahora.getTime() >= m.fechaBase.getTime() - VARIACION_MAXIMA_MINUTOS * 60000);
+  ].filter(m => ahora.getTime() >= m.fechaBase.getTime() -
+    (m.accion === "ENTRADA" ? VARIACION_MAXIMA_MINUTOS * 60000 : 0));
   if (!pendientes.length) { respuesta.causa = "horario_todavia_no_iniciado"; return respuesta; }
 
   const qe = new cliente.Query("Employees");
@@ -128,7 +133,9 @@ export async function registrarFichajesAutomaticos({
       registro.set("fechaLaboral", fecha);
       registro.set("claveAutomatica", `${empleado.id}:${fecha}:${pendiente.accion}`);
       registro.set("registradoEn", new Date(ahora));
-      registro.set("observacion", "Hora programada con variación aleatoria de hasta ±5 min: NO acredita presencia ni fichaje GPS.");
+      registro.set("observacion", pendiente.accion === "SALIDA"
+        ? "Salida programada automáticamente entre 15:00 y 15:05: NO acredita presencia ni fichaje GPS."
+        : "Entrada programada automáticamente entre 07:55 y 08:05: NO acredita presencia ni fichaje GPS.");
       await registro.save();
       existentes.push(registro);
       if (pendiente.accion === "ENTRADA") respuesta.entradasNuevas++;
