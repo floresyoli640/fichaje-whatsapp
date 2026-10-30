@@ -1,5 +1,6 @@
 import Parse from "parse/node.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
+import { prepararEstadoResumen, textoResumenCorto, textoDetalleJornadas } from "./resumen-corto.js";
 import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, prepararConfirmacion, numeroNormalizado } from "./jornadas-admin.js";
 
 // Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
@@ -77,33 +78,33 @@ async function fichajesDelDia(empleado, fecha) {
     salidaAutomatica: !salidaReal && Boolean(salidaAuto)
   };
 }
-async function resumen(fecha, empleados, faltas) {
-  const ids = new Set(faltas.map(a => a.get("empleadoId")));
+async function resumen(fecha, empleados, faltas, detallado = false) {
+  const idsAusentes = new Set(faltas.map(a => a.get("empleadoId")));
   const previstos = await obtenerJornadasPrevistas(fecha, empleados, festivos(fecha));
   const q = new Parse.Query("ConfirmacionesJornada");
   q.equalTo("fechaLaboral", fecha);
   q.limit(1000);
   const confirmaciones = await q.find();
-  const confirmadas = new Map(confirmaciones.map(r => [r.get("empleadoId"), r]));
-  const lineas = await Promise.all(previstos.map(async p => {
-    if (ids.has(p.empleadoId)) return `• ${p.nombre}: AUSENTE`;
+  const confirmadas = new Set(confirmaciones.map(r => r.get("empleadoId")));
+  const jornadas = await Promise.all(previstos.map(async p => {
+    if (idsAusentes.has(p.empleadoId)) {
+      return { id: p.empleadoId, nombre: p.nombre, marcas: {} };
+    }
     const empleado = empleados.find(e => e.id === p.empleadoId);
-    const marcas = await fichajesDelDia(empleado, fecha);
-    const r = confirmadas.get(p.empleadoId);
-    const estado = !r ? "" : r.get("estado") === "CONFIRMADA_ADMIN_PENDIENTE_VERIFICACION"
-      ? " | ✅ registrada por administración (horario previsto, pendiente de verificar)"
-      : " | ✅ confirmada por administración (fichajes/corrección)";
-    const mostrarMarca = (fechaMarca, automatica, accion) => {
-      if (!fechaMarca) return accion === "ENTRADA" ? "sin entrada" : "sin salida";
-      return horaLocal(fechaMarca) + (automatica ? " (AUTO, sin verificar)" : " (real)");
+    return {
+      id: p.empleadoId, nombre: p.nombre,
+      marcas: await fichajesDelDia(empleado, fecha)
     };
-    return `• ${p.nombre}: ${mostrarMarca(marcas.entrada, marcas.entradaAutomatica, "ENTRADA")} / ${mostrarMarca(marcas.salida, marcas.salidaAutomatica, "SALIDA")}${estado}`;
   }));
-  return `📋 *Resumen ${fecha}*\nHorario previsto: 08:00–15:00\nOrden HABITUAL de referencia: María de la O Enriqueta primero; Yolanda normalmente después (no prueba la llegada real).\n\n${lineas.join("\n") || "No hay jornadas previstas"}\n\nComandos: VERIFICAR BD | AUSENTE Nombre Apellidos | CORREGIR Nombre Apellidos HH:MM HH:MM motivo | CONFIRMAR TODOS | RESUMEN\nCONFIRMAR TODOS registra las jornadas de todos los empleados no ausentes. Los horarios previstos se guardan como referencias pendientes de verificar, no como fichajes GPS.`;
+  const estado = prepararEstadoResumen({
+    fecha, jornadas, ausentes: idsAusentes, confirmadas
+  });
+  return detallado ? textoDetalleJornadas(estado, horaLocal) : textoResumenCorto(estado);
 }
+
 export async function procesarComandoAdmin({ texto, numero, responder, canalConfirmacion = "whatsapp" }) {
   const comando = texto.trim();
-  if (!/^(?:RESUMEN|VERIFICAR BD|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
+  if (!/^(?:RESUMEN|DETALLE|VERIFICAR BD|AUSENTE\s+.+|CORREGIR\s+.+|CONFIRMAR TODOS)$/i.test(comando)) return false;
   if (!esAdministrador(numero)) {
     await responder("⛔ Comando reservado a administración.");
     return true;
@@ -155,8 +156,8 @@ export async function procesarComandoAdmin({ texto, numero, responder, canalConf
       return true;
     }
     const faltas = await ausencias(fecha);
-    if (/^RESUMEN$/i.test(comando)) {
-      await responder(await resumen(fecha, empleados, faltas));
+    if (/^(?:RESUMEN|DETALLE)$/i.test(comando)) {
+      await responder(await resumen(fecha, empleados, faltas, /^DETALLE$/i.test(comando)));
       return true;
     }
     const excluidos = new Set(faltas.map(a => a.get("empleadoId")));
