@@ -1,6 +1,7 @@
 // Gestión de jornadas previstas y confirmación administrativa.
 // Este módulo NO crea fichajes de entrada/salida ficticios.
 import Parse from "parse/node.js";
+import { ordenarPorOrdenHabitual } from "./orden-llegadas.js";
 
 export const ZONA = "Europe/Madrid";
 export const HORARIO = Object.freeze({ entrada: "08:00", salida: "15:00" });
@@ -30,7 +31,7 @@ export function esAdministrador(numero, adminConfigurado = process.env.ADMIN_WHA
 
 export async function obtenerJornadasPrevistas(fechaISO, empleados, festivos = new Set()) {
   if (!esLaborable(fechaISO, festivos)) return [];
-  return empleados.filter(e => e.get("activo") === true && e.get("exentoFichaje") !== true)
+  return ordenarPorOrdenHabitual(empleados.filter(e => e.get("activo") === true && e.get("exentoFichaje") !== true))
     .map(e => ({
       empleadoId: e.id,
       nombre: e.get("nombre") || "Sin nombre",
