@@ -67,25 +67,25 @@ test("No permite ejecutar comandos de administración a un número ajeno", async
   }
 });
 
-test("Bloquea comandos si no hay calendario configurado", async () => {
-  const { procesarComandoAdmin } = await import("../comandos-admin.js");
-  const adminPrevio = process.env.ADMIN_WHATSAPP;
-  const festivosPrevio = process.env.FESTIVOS_UBEDA_2026;
-  process.env.ADMIN_WHATSAPP = "34600000000";
+test("El calendario oficial 2026 es obligatorio aunque la variable de Railway omita festivos", async () => {
+  const { esDiaLaborableConfigurado, FESTIVOS_OFICIALES_UBEDA_2026 } = await import("../comandos-admin.js");
+  const previo = process.env.FESTIVOS_UBEDA_2026;
   delete process.env.FESTIVOS_UBEDA_2026;
-  const respuestas = [];
   try {
-    const procesado = await procesarComandoAdmin({
-      texto: "RESUMEN", numero: "34600000000",
-      responder: async texto => respuestas.push(texto)
-    });
-    assert.equal(procesado, true);
-    assert.match(respuestas[0], /Falta configurar el calendario oficial/);
+    assert.equal(FESTIVOS_OFICIALES_UBEDA_2026.length, 14);
+    for (const fecha of [
+      "2026-09-08", "2026-09-29", "2026-10-12",
+      "2026-11-02", "2026-12-07", "2026-12-08"
+    ]) {
+      assert.equal(esDiaLaborableConfigurado(fecha), false, fecha);
+    }
+    assert.equal(esDiaLaborableConfigurado("2026-11-03"), true);
+    assert.equal(esDiaLaborableConfigurado("2026-10-31"), false);
+    assert.equal(esDiaLaborableConfigurado("2026-11-01"), false);
+    assert.throws(() => esDiaLaborableConfigurado("2027-01-04"), /Falta configurar/);
   } finally {
-    if (adminPrevio === undefined) delete process.env.ADMIN_WHATSAPP;
-    else process.env.ADMIN_WHATSAPP = adminPrevio;
-    if (festivosPrevio === undefined) delete process.env.FESTIVOS_UBEDA_2026;
-    else process.env.FESTIVOS_UBEDA_2026 = festivosPrevio;
+    if (previo === undefined) delete process.env.FESTIVOS_UBEDA_2026;
+    else process.env.FESTIVOS_UBEDA_2026 = previo;
   }
 });
 
