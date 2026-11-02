@@ -811,6 +811,15 @@ void comprobarRegistrosBack4App()
   .then(resultado => console.log("✅ VERIFICACIÓN REAL BACK4APP:", JSON.stringify(resultado)))
   .catch(error => console.error("❌ VERIFICACIÓN REAL BACK4APP:", error?.message || error));
 
+// Auditoría puntual y solo lectura del puente de Todos los Santos de 2026.
+// No modifica ni elimina fichajes reales, provisionales o confirmaciones.
+if (fechaLocal() === "2026-11-02") {
+  void Promise.all(["2026-10-31", "2026-11-01", "2026-11-02"]
+    .map(fecha => comprobarRegistrosBack4App(fecha)))
+    .then(resultados => console.log("🔎 AUDITORÍA FINES DE SEMANA/FESTIVO 31OCT-02NOV:", JSON.stringify(resultados)))
+    .catch(error => console.error("❌ AUDITORÍA 31OCT-02NOV:", error?.message || error));
+}
+
 // Una ejecución controlada solicitada explícitamente por administración para la fecha indicada.
 // No convierte horarios previstos en fichajes GPS; solo crea confirmaciones auditadas.
 if (process.env.CONFIRMACION_ADMIN_UNICA_FECHA === fechaLocal() && process.env.ADMIN_WHATSAPP) {
