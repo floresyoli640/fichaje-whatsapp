@@ -2,6 +2,7 @@
 // No solicita, procesa, guarda ni valida ubicación; también sirve para teletrabajo.
 import Parse from "parse/node.js";
 import { fechaLocal, numeroNormalizado } from "./jornadas-admin.js";
+import { esDiaLaborableConfigurado } from "./comandos-admin.js";
 
 function numerosDe(empleado, numero) {
   return [...new Set([numero, empleado.get("telefono"), empleado.get("waId")]
@@ -31,6 +32,9 @@ export async function registrarFichajeWhatsApp({
   if (!numeros.length) throw new Error("No se pudo verificar el número del empleado");
 
   const fecha = fechaLocal(ahora);
+  if (!esDiaLaborableConfigurado(fecha)) {
+    throw new Error("Hoy es festivo o fin de semana: no se permiten fichajes en días no laborables.");
+  }
   const inicio = new Date(fecha + "T00:00:00Z").getTime();
   const consulta = new cliente.Query("TimeEntries");
   consulta.equalTo("accion", accion);
