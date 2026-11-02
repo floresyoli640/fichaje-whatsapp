@@ -1,4 +1,4 @@
-// Menú interactivo de administración: 4 acciones en bloques de hasta 3 botones.
+// Menú de administración: texto fiable por defecto y 4 acciones interactivas opcionales.
 // Baileys utiliza WhatsApp Web (no la API oficial); el cliente puede no mostrar botones.
 import { generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 
@@ -16,8 +16,8 @@ export const TEXTO_MENU_ADMIN = [
   "3️⃣ DETALLE — horarios por trabajador",
   "4️⃣ VERIFICAR BD — comprobar registros guardados",
   "",
-  "Pulsa un botón o responde con 1, 2, 3 o 4.",
-  "Si los botones no aparecen, los comandos por escrito siguen funcionando."
+  "Responde con 1, 2, 3 o 4.",
+  "También puedes escribir RESUMEN, CONFIRMAR TODOS, DETALLE o VERIFICAR BD."
 ].join("\n");
 
 function desenvuelve(mensaje) {
@@ -107,11 +107,20 @@ export function nodosBotonesAdmin() {
 
 // Enviar primero la alternativa de texto para que el admin siempre tenga los
 // comandos si su WhatsApp (especialmente iOS) ignora los botones nativos.
-export async function enviarMenuAdmin(sock, jid) {
+export async function enviarMenuAdmin(
+  sock, jid,
+  { botonesExperimentales = process.env.HABILITAR_BOTONES_WHATSAPP === "1" } = {}
+) {
   if (!sock || !jid?.endsWith("@s.whatsapp.net") && !jid?.endsWith("@lid")) {
     throw new Error("WhatsApp o chat de administración no disponible");
   }
+  // Una única notificación legible. En la versión actual los botones nativos
+  // generan mensajes cifrados que Android puede mostrar como «Esperando mensaje».
   await sock.sendMessage(jid, { text: TEXTO_MENU_ADMIN });
+  if (!botonesExperimentales) {
+    console.log("📱 Menú por texto enviado a administración (una sola notificación, botones experimentales desactivados)");
+    return { enviado: false, fallbackTexto: true };
+  }
   try {
     if (!sock.user?.id || typeof sock.relayMessage !== "function") {
       throw new Error("Baileys no dispone de envío de mensajes interactivos");
