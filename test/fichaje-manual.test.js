@@ -127,3 +127,21 @@ test("No mezcla fichajes de días diferentes ni admite acciones inválidas", asy
     empleado, accion: "DESCANSO", numero: "600000001", cliente
   }), /inválidos/);
 });
+
+
+test("No permite nuevos fichajes de WhatsApp en festivos de Úbeda ni fines de semana", async () => {
+  const { filas, cliente } = baseSimulada();
+  for (const fechaUtc of [
+    "2026-10-31T07:00:00Z", // sábado
+    "2026-11-01T07:00:00Z", // domingo
+    "2026-11-02T07:00:00Z", // traslado Todos los Santos (lunes)
+    "2026-12-07T07:00:00Z", // traslado Constitución (lunes)
+    "2026-09-08T06:00:00Z"  // festivo local Úbeda
+  ]) {
+    await assert.rejects(() => registrarFichajeWhatsApp({
+      empleado, accion: "ENTRADA", numero: "34600000001",
+      ahora: new Date(fechaUtc), cliente
+    }), /festivo o fin de semana/i, fechaUtc);
+  }
+  assert.equal(filas.length, 0);
+});
