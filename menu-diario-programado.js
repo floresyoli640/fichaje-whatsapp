@@ -1,12 +1,13 @@
-// Envío diario del menú a las 15:30, hora de Madrid.
+// Envío de menú solo en días laborables de Úbeda a las 15:30, hora de Madrid.
 // Reintenta cada minuto hasta las 15:59 si el bot estaba desconectado.
 // La marca de envío se guarda en el volumen persistente de Railway para evitar repetidos.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fechaLocal, numeroNormalizado } from "./jornadas-admin.js";
 import { enviarMenuAdmin } from "./menu-admin.js";
+import { esDiaLaborableConfigurado } from "./comandos-admin.js";
 
-export const CRON_MENU_DIARIO = "30-59 15 * * *";
+export const CRON_MENU_DIARIO = "30-59 15 * * 1-5";
 export const ZONA_MENU_DIARIO = "Europe/Madrid";
 export const ARCHIVO_ENVIO_MENU = "/app/data/ultimo_menu_admin_1530.json";
 
@@ -15,6 +16,7 @@ let ultimaFechaEnviadaEnMemoria = null;
 
 export function enVentanaMenuDiario(ahora = new Date()) {
   if (!(ahora instanceof Date) || Number.isNaN(ahora.getTime())) return false;
+  if (!esDiaLaborableConfigurado(fechaLocal(ahora))) return false;
   const partes = new Intl.DateTimeFormat("en-GB", {
     timeZone: ZONA_MENU_DIARIO,
     hour: "2-digit", minute: "2-digit", hourCycle: "h23"
@@ -46,6 +48,7 @@ export async function enviarMenuDiarioProgramado({
   rutaEstado = ARCHIVO_ENVIO_MENU,
   enviarMenu = enviarMenuAdmin
 } = {}) {
+  if (!esDiaLaborableConfigurado(fechaLocal(ahora))) return { estado: "dia_no_laborable" };
   if (!enVentanaMenuDiario(ahora)) return { estado: "fuera_de_horario" };
   const numero = numeroNormalizado(numeroAdmin);
   if (!/^\d{11,15}$/.test(numero)) return { estado: "sin_administrador" };
