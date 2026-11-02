@@ -66,39 +66,59 @@ test("Reconoce respuestas desde botones iOS, Android, list, template y native_fl
   assert.equal(interpretarNumeroAdmin("7"), null);
 });
 
-test("Envía primero texto utilizable, después botones, y conserva el fallback en caso de error", async () => {
-  const orden = [];
+test("Por defecto envía un único mensaje de texto y no dos botones no compatibles", async () => {
+  const envios = [];
   const sock = {
     user: { id: "34610000000:1@s.whatsapp.net" },
     sendMessage: async (jid, payload) => {
-      orden.push({ tipo: "texto", jid, payload });
+      envios.push({ tipo: "texto", jid, payload });
     },
     relayMessage: async (jid, payload, options) => {
-      orden.push({ tipo: "botones", jid, payload, options });
+      envios.push({ tipo: "botones", jid, payload, options });
     }
   };
-  const ok = await enviarMenuAdmin(sock, JID);
+  const resultado = await enviarMenuAdmin(sock, JID, { botonesExperimentales: false });
+  assert.deepEqual(resultado, { enviado: false, fallbackTexto: true });
+  assert.equal(envios.length, 1);
+  assert.equal(envios[0].jid, JID);
+  assert.equal(envios[0].payload.text, TEXTO_MENU_ADMIN);
+  assert.match(envios[0].payload.text, /1️⃣ RESUMEN/);
+  assert.match(envios[0].payload.text, /4️⃣ VERIFICAR BD/);
+});
+
+test("Los botones experimentales se pueden habilitar explícitamente y conservan texto si fallan", async () => {
+  const envios = [];
+  const sock = {
+    user: { id: "34610000000:1@s.whatsapp.net" },
+    sendMessage: async (jid, payload) => {
+      envios.push({ tipo: "texto", jid, payload });
+    },
+    relayMessage: async (jid, payload, options) => {
+      envios.push({ tipo: "botones", jid, payload, options });
+    }
+  };
+  const ok = await enviarMenuAdmin(sock, JID, { botonesExperimentales: true });
   assert.deepEqual(ok, { enviado: true, fallbackTexto: true });
-  assert.equal(orden[0].tipo, "texto");
-  assert.equal(orden[1].tipo, "botones");
-  assert.equal(orden[1].jid, JID);
-  assert.equal(orden[1].options.additionalNodes.length, 2);
-  assert.equal(orden[2].tipo, "botones");
-  assert.equal(orden[2].jid, JID);
-  assert.equal(orden.filter(e => e.tipo === "botones").length, 2);
-  assert.equal(orden[1].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 3);
-  assert.equal(orden[2].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 1);
-  assert.match(orden[0].payload.text, /CONFIRMAR TODOS/);
-  assert.equal(orden[0].payload.text, TEXTO_MENU_ADMIN);
+  assert.equal(envios.length, 3);
+  assert.equal(envios[0].tipo, "texto");
+  assert.equal(envios[1].tipo, "botones");
+  assert.equal(envios[2].tipo, "botones");
+  assert.equal(envios[1].options.additionalNodes.length, 2);
+  assert.equal(envios[1].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 3);
+  assert.equal(envios[2].payload.viewOnceMessage.message.interactiveMessage.nativeFlowMessage.buttons.length, 1);
 
   const soloTexto = {
     user: { id: "34610000000:1@s.whatsapp.net" },
-    sendMessage: async (jid, payload) => { orden.push({ tipo: "fallback", jid, payload }); },
-    relayMessage: async () => { throw new Error("Error simulado de botones"); }
+    sendMessage: async (jid, payload) => {
+      envios.push({ tipo: "fallback", jid, payload });
+    },
+    relayMessage: async () => {
+      throw new Error("Error simulado de botones");
+    }
   };
-  const resultado = await enviarMenuAdmin(soloTexto, JID);
-  assert.deepEqual(resultado, { enviado: false, fallbackTexto: true });
-  assert.equal(orden.at(-1).tipo, "fallback");
+  const fallback = await enviarMenuAdmin(soloTexto, JID, { botonesExperimentales: true });
+  assert.deepEqual(fallback, { enviado: false, fallbackTexto: true });
+  assert.equal(envios.at(-1).tipo, "fallback");
 });
 
 test("El menú está reservado a administración, sin leer Back4App en fin de semana", async () => {
