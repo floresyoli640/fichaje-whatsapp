@@ -422,6 +422,8 @@ function iniciarRecordatorios() {
   cron.schedule("5 15 * * 1-5", async () => {
     if (sockWA && estadoWA === "conectado") {
       try {
+        // En festivos, ni el resumen automático ni los fichajes programados deben enviarse.
+        if (!esDiaLaborableConfigurado(fechaLocal())) return;
         // Incluir los últimos horarios provisionales (hasta +5 minutos) en el resumen.
         await crearMarcajesProgramados();
         await enviarResumenDiario(sockWA);
@@ -659,6 +661,12 @@ async function iniciarBot() {
           //   ENTRADA / SALIDA
           // ===============================
           if (texto === "ENTRADA" || texto === "SALIDA") {
+            if (!esDiaLaborableConfigurado(fechaLocal())) {
+              await sock.sendMessage(msg.key.remoteJid, {
+                text: "📅 Hoy es festivo o fin de semana en Úbeda. No se registran fichajes en días no laborables."
+              });
+              continue;
+            }
             const accion = texto;
 
             console.log("🧪 Voy a buscar empleado con número:", numero);
@@ -761,7 +769,7 @@ async function crearMarcajesProgramados() {
 }
 cron.schedule("* * * * 1-5", crearMarcajesProgramados, { timezone: "Europe/Madrid" });
 
-// Envío automático TODOS los días a las 15:30 (Madrid).
+// Envío automático solo los días laborables de Úbeda a las 15:30 (Madrid).
 // Reintenta hasta las 15:59 si WhatsApp no estaba conectado, y no repite una fecha enviada.
 cron.schedule(CRON_MENU_DIARIO, async () => {
   try {
