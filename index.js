@@ -814,9 +814,9 @@ void comprobarRegistrosBack4App()
 // Auditoría puntual y solo lectura del puente de Todos los Santos de 2026.
 // No modifica ni elimina fichajes reales, provisionales o confirmaciones.
 if (fechaLocal() === "2026-11-02") {
-  void Promise.all(["2026-10-31", "2026-11-01", "2026-11-02"]
+  void Promise.all(["2026-10-30", "2026-10-31", "2026-11-01", "2026-11-02"]
     .map(fecha => comprobarRegistrosBack4App(fecha)))
-    .then(resultados => console.log("🔎 AUDITORÍA FINES DE SEMANA/FESTIVO 31OCT-02NOV:", JSON.stringify(resultados)))
+    .then(resultados => console.log("🔎 AUDITORÍA VIERNES Y FESTIVOS 30OCT-02NOV:", JSON.stringify(resultados)))
     .catch(error => console.error("❌ AUDITORÍA 31OCT-02NOV:", error?.message || error));
 }
 
