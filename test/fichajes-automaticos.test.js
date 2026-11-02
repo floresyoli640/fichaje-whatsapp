@@ -190,3 +190,22 @@ test("NINGUNA salida automática tiene hora anterior a las 15:00, ni entre 14:55
     }
   });
 });
+
+
+test("No genera fichajes automáticos el festivo trasladado del 2 de noviembre sin variable extra", async () => {
+  const anterior = process.env.FESTIVOS_UBEDA_2026;
+  delete process.env.FESTIVOS_UBEDA_2026;
+  try {
+    const { cliente, filas } = back4appFalso();
+    const r = await registrarFichajesAutomaticos({
+      fecha: "2026-11-02", ahora: new Date("2026-11-02T15:10:00Z"), cliente
+    });
+    assert.equal(r.causa, "dia_no_laborable");
+    assert.equal(r.entradasNuevas, 0);
+    assert.equal(r.salidasNuevas, 0);
+    assert.equal(filas.length, 0);
+  } finally {
+    if (anterior === undefined) delete process.env.FESTIVOS_UBEDA_2026;
+    else process.env.FESTIVOS_UBEDA_2026 = anterior;
+  }
+});
