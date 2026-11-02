@@ -3,17 +3,39 @@ import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { prepararEstadoResumen, textoResumenCorto, textoDetalleJornadas } from "./resumen-corto.js";
 import { fechaLocal, esLaborable, obtenerJornadasPrevistas, esAdministrador, confirmarJornada, prepararConfirmacion, numeroNormalizado } from "./jornadas-admin.js";
 
-// Fechas ISO separadas por comas, incluidas las fiestas nacionales, andaluzas y locales.
-// Configurar FESTIVOS_UBEDA_2026 en Railway tras contrastar el calendario oficial.
+// Calendario oficial de Úbeda (Jaén) 2026, incluidos los traslados a lunes.
+// Ayuntamiento: https://sede.ubeda.es/eAdmin/InfoSede.do?pagina=calendarioDiasInhabiles
+// Puede ampliarse con FESTIVOS_UBEDA_AAAA, nunca quitar un festivo oficial conocido.
+export const FESTIVOS_OFICIALES_UBEDA_2026 = Object.freeze([
+  "2026-01-01", "2026-01-06", "2026-02-28", "2026-04-02",
+  "2026-04-03", "2026-05-01", "2026-08-15", "2026-09-08",
+  "2026-09-29", "2026-10-12", "2026-11-02", "2026-12-07",
+  "2026-12-08", "2026-12-25"
+]);
+
 function festivos(fecha = fechaLocal()) {
-  const clave = "FESTIVOS_UBEDA_" + fecha.slice(0, 4);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new Error("Fecha laboral inválida");
+  const ano = fecha.slice(0, 4);
+  const clave = "FESTIVOS_UBEDA_" + ano;
   const valor = process.env[clave];
-  if (!valor?.trim()) throw new Error("Falta configurar el calendario oficial " + clave);
-  const fechas = valor.split(",").map(x => x.trim()).filter(Boolean);
-  if (fechas.some(x => !/^\d{4}-\d{2}-\d{2}$/.test(x))) throw new Error("Formato inválido en " + clave);
-  return new Set(fechas);
+  // Para otros años se requiere un calendario configurado; mejor bloquear
+  // la generación automática que inventar jornadas durante un festivo.
+  if (ano !== "2026" && !valor?.trim()) {
+    throw new Error("Falta configurar el calendario oficial " + clave);
+  }
+  const fechasConfiguradas = (valor || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (fechasConfiguradas.some(x => !/^\d{4}-\d{2}-\d{2}$/.test(x) || !x.startsWith(ano + "-"))) {
+    throw new Error("Formato o año inválido en " + clave);
+  }
+  return new Set([
+    ...(ano === "2026" ? FESTIVOS_OFICIALES_UBEDA_2026 : []),
+    ...fechasConfiguradas
+  ]);
 }
 export function esDiaLaborableConfigurado(fecha = fechaLocal()) {
+  // Fines de semana nunca laborables, incluso con festivos aún sin configurar.
+  const dia = new Date(fecha + "T12:00:00Z").getUTCDay();
+  if (dia === 0 || dia === 6) return false;
   return esLaborable(fecha, festivos(fecha));
 }
 async function empleadosActivos() {
