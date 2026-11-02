@@ -29,6 +29,7 @@ import { registrarJornadasPrevistas } from "./planificacion-automatica.js";
 import { registrarFichajesAutomaticos } from "./fichajes-automaticos.js";
 import { registrarFichajeWhatsApp } from "./fichaje-manual.js";
 import { enviarMenuAdmin, interpretarSeleccionAdmin, interpretarNumeroAdmin } from "./menu-admin.js";
+import { crearAlmacenMensajesSalientes, habilitarRegistroSalientes } from "./registro-mensajes-wa.js";
 import { enviarMenuDiarioProgramado, CRON_MENU_DIARIO, ZONA_MENU_DIARIO } from "./menu-diario-programado.js";
 import { comprobarRegistrosBack4App } from "./diagnostico-back4app.js";
 import { auditarHistoria } from "./auditoria-historica.js";
@@ -475,10 +476,14 @@ async function iniciarBot() {
 
     console.log("🚀 Iniciando Baileys con versión:", version);
 
+    const almacenSalientes = crearAlmacenMensajesSalientes();
     const sock = makeWASocket({
       version,
-      auth: state
+      auth: state,
+      // Baileys pide el mensaje original cuando el receptor solicita un reenvío.
+      getMessage: almacenSalientes.obtener
     });
+    habilitarRegistroSalientes(sock, almacenSalientes);
 
     sockWA = sock;
 
